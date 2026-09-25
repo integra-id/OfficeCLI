@@ -11,7 +11,7 @@ Buat dokumen Word teknis project (panduan integrasi, spesifikasi, runbook, BA, d
 
 ## Kapan dipakai
 
-- User minta buat/update dokumen teknis `.docx` bergaya panduan Integra / KBN / project sejenis
+- User minta buat/update dokumen teknis `.docx` bergaya panduan Integra / klien / project sejenis
 - Perlu cover + meta dokumen + riwayat versi + TOC terhubung + bab bernomor + tabel + callout + blok kode
 - Repo/tooling: `integra-id/OfficeCLI` (fitur `htmlchunk`) atau binary `officecli` yang mendukung `--type htmlchunk`
 
@@ -186,11 +186,11 @@ Untuk callout / tabel / kode setelah heading: htmlchunk + `matchSrc=true` (bungk
 # Ordered list — teks TANPA prefix "1." / "2."
 officecli add "$FILE" /body --type paragraph \
   --prop listStyle=ordered \
-  --prop text="Internal Bank Indonesia — Admin BI Pusat, …" \
+  --prop text="Internal [perusahaan/klien] — Admin Pusat, …" \
   --prop style=Normal
 officecli add "$FILE" /body --type paragraph \
   --prop listStyle=ordered \
-  --prop text="Eksternal penyelenggara KUPVA BB — Admin PUKA, …"
+  --prop text="Eksternal mitra/operator — Admin Operasional, …"
 
 # Bullet
 officecli add "$FILE" /body --type paragraph \
