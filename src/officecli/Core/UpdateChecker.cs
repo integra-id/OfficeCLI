@@ -63,7 +63,13 @@ internal static class UpdateChecker
         // version-pinned binary. When the setting is off, the staged file is
         // left in place, just never applied by THIS user — deleting it would
         // only make an enabled sibling process re-download it next cycle.
-        if (config.AutoUpdate)
+        // Prerelease/fork builds (InformationalVersion carries a "-suffix",
+        // e.g. 1.0.152-htmlchunk.1) never auto-update: the update source is
+        // the upstream stable channel, which would silently replace the build
+        // with one that lacks its features.
+        var autoUpdate = config.AutoUpdate && !IsPrereleaseBuild();
+
+        if (autoUpdate)
             ApplyPendingUpdate();
 
         // Skill auto-refresh: if the running binary's version differs from the
@@ -81,7 +87,7 @@ internal static class UpdateChecker
         }
 
         // Respect autoUpdate setting
-        if (!config.AutoUpdate) return;
+        if (!autoUpdate) return;
 
         // If stale, spawn a background process to refresh (fire and forget)
         if (!config.LastUpdateCheck.HasValue ||
@@ -513,6 +519,13 @@ internal static class UpdateChecker
         if (version == null) return null;
         var match = Regex.Match(version, @"^(\d+\.\d+\.\d+)");
         return match.Success ? match.Groups[1].Value : version;
+    }
+
+    private static bool IsPrereleaseBuild()
+    {
+        var version = Assembly.GetExecutingAssembly()
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        return version != null && version.Split('+', 2)[0].Contains('-');
     }
 
     private static bool IsNewer(string latest, string current)
