@@ -1,0 +1,3 @@
+Catatan teks biasa (format=text).
+Baris kedua tetap baris terpisah;
+    spasi di awal baris juga dipertahankan.
