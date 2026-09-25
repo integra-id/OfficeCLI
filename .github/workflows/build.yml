@@ -14,12 +14,6 @@ jobs:
     strategy:
       matrix:
         include:
-          - rid: osx-arm64
-            name: officecli-mac-arm64
-            os: macos-latest
-          - rid: osx-x64
-            name: officecli-mac-x64
-            os: macos-latest
           - rid: linux-x64
             name: officecli-linux-x64
             os: ubuntu-latest
