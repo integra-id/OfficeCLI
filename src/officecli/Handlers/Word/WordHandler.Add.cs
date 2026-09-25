@@ -280,15 +280,10 @@ public partial class WordHandler
             "commentrangestart" or "commentrangeend" or "commentreference" =>
                 throw new ArgumentException(
                     $"Cannot add '{type}' directly. Adding a bare comment range marker into a paragraph destroys existing runs (schema-aware sequence reset). Use `add --type comment --prop start=... --prop end=... --prop text=...` to create the comment atomically."),
-            // Reject altChunk: it embeds alternate-format payloads (HTML/RTF
-            // fragments) via OOXML relationship-bound parts. AddDefault would
-            // fall through to TryCreateTypedElement which writes user props
-            // as raw unnamespaced attrs (e.g. src=...) — schema-invalid; Word
-            // rejects the file. Batch dump already warns+drops altChunk for
-            // the same reason.
-            "altchunk" =>
-                throw new ArgumentException(
-                    "Cannot add 'altChunk' directly. altChunk embeds alternate-format payloads via OOXML relationships which require a curated implementation. Use the batch import or raw-set path for round-trip fidelity."),
+            // HTML chunk: stored verbatim in an AlternativeFormatImportPart and
+            // referenced by <w:altChunk r:id="…"/>; Word converts it to native
+            // content on open. See WordHandler.Add.HtmlChunk.cs.
+            "htmlchunk" or "html" or "altchunk" => AddHtmlChunk(parent, parentPath, index, properties),
             _ => AddDefault(parent, parentPath, index, properties, type),
         };
         }
@@ -392,6 +387,11 @@ public partial class WordHandler
                     if (isFindAnchor) break;
                     throw new ArgumentException(
                         $"Cannot add '{type}' under {parentPath}: a paragraph cannot contain another paragraph, table, section break, or TOC. Add at /body instead, or use --after/--before find:<text> to split this paragraph at the anchor.");
+                case "htmlchunk":
+                case "html":
+                case "altchunk":
+                    throw new ArgumentException(
+                        $"Cannot add '{type}' under {parentPath}: an HTML chunk is block-level content. Add it at /body (use --after/--before {parentPath.Split('/').Last()} to position it) or into a table cell.");
                 case "sectpr":
                     // Raw <w:sectPr> as a direct child of <w:p> is schema-invalid.
                     // sectPr may only live inside <w:pPr> (paragraph-level break)
@@ -473,6 +473,12 @@ public partial class WordHandler
                 case "smartart":
                 case "vmlshape":
                 case "drawingshape":
+                    break;
+                // HTML chunk: <w:altChunk> is a legal CT_Tc block child;
+                // AddHtmlChunk keeps a trailing paragraph after it.
+                case "htmlchunk":
+                case "html":
+                case "altchunk":
                     break;
                 // BUG-FIX(B2): bookmark is an inline-level construct, but
                 // AddBookmark redirects into the cell's first paragraph

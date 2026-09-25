@@ -3911,7 +3911,7 @@ public partial class WordHandler
         node.ChildCount = bodyNode.ChildElements.Count;
         if (depth > 0)
         {
-            int pIdx = 0, tblIdx = 0, mathParaIdx = 0, sdtIdx = 0;
+            int pIdx = 0, tblIdx = 0, mathParaIdx = 0, sdtIdx = 0, altChunkIdx = 0;
             // BUG-DUMP7-04: w:customXml body wrappers are non-structural —
             // their inner paragraphs and tables should appear as direct
             // body children (with shared p/tbl/sdt counters) so the
@@ -3954,6 +3954,13 @@ public partial class WordHandler
                 {
                     foreach (var inner in cxBlock.ChildElements)
                         WalkBodyChild(inner);
+                }
+                else if (child is AltChunk)
+                {
+                    // Positional like p/tbl — the generic [1] fallback below
+                    // listed every chunk as altChunk[1].
+                    altChunkIdx++;
+                    node.Children.Add(ElementToNode(child, $"{path}/altChunk[{altChunkIdx}]", depth - 1));
                 }
                 else if (child is BookmarkEnd bodyBkEnd)
                 {
@@ -6215,6 +6222,9 @@ public partial class WordHandler
 
         if (element is SectionProperties sectPrEl)
             return SectionPropertiesToNode(sectPrEl, path);
+
+        if (element is AltChunk altChunkEl)
+            return AltChunkToNode(altChunkEl, node);
 
         if (element is Paragraph para)
             return ParagraphToNode(para, node, path, depth);

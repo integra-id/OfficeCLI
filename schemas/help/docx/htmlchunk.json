@@ -1,0 +1,97 @@
+{
+  "$schema": "../_schema.json",
+  "format": "docx",
+  "element": "htmlchunk",
+  "elementAliases": [
+    "html",
+    "altchunk"
+  ],
+  "parent": "body|table-cell",
+  "operations": {
+    "add": true,
+    "set": false,
+    "get": true,
+    "query": false,
+    "remove": true
+  },
+  "paths": {
+    "positional": [
+      "/body/altChunk[N]",
+      "/body/tbl[N]/tr[M]/tc[K]/altChunk[N]"
+    ]
+  },
+  "note": "Embeds a chunk of HTML (or xhtml / mht / rtf / plain text) into the document using Word's native alternative-format import: the payload is stored verbatim in its own package part (word/afchunkN.htm) and referenced from the body by <w:altChunk r:id=\"…\"/>. Word converts the chunk into native paragraphs, tables, lists and images when the document is opened — full HTML/CSS fidelity without OfficeCLI translating the markup (contrast 'markdown', which expands into native elements immediately). Add returns /body/altChunk[N]. Until Word has opened and re-saved the file the chunk stays a single altChunk node: 'get' shows it, 'view html' / preview render its source as escaped text (never as live HTML), and its content is not searchable/editable via paragraph paths. An HTML fragment (no <html>/<!DOCTYPE>) is wrapped in a minimal UTF-8 document; a complete HTML document is stored as-is. Only the main document body and its table cells are supported (not headers, footers, footnotes). Round-trips through dump→batch as 'add htmlchunk'. KNOWN LIMITATIONS: rendering depends on the consuming application — Word imports altChunk; LibreOffice imports HTML chunks; Google Docs and some viewers ignore them. Relative image/link URLs inside the HTML are not resolved; use absolute http(s) URLs or data: URIs.",
+  "properties": {
+    "html": {
+      "type": "string",
+      "description": "HTML markup to embed — a fragment ('<h2>Title</h2><table>…</table>') or a complete document. Aliases: content, text. Takes precedence over src.",
+      "aliases": [
+        "content",
+        "text"
+      ],
+      "add": true,
+      "set": false,
+      "get": false,
+      "examples": [
+        "--prop html='<h2>Report</h2><p>Sales grew <b>12%</b>.</p>'",
+        "--prop html='<table border=\"1\"><tr><td colspan=\"2\">Total</td></tr></table>'"
+      ],
+      "enforcement": "report"
+    },
+    "src": {
+      "type": "string",
+      "description": "Path to a file to embed (used when no inline html/content/text is given). The format is inferred from the extension: .html/.htm → html, .xhtml → xhtml, .mht/.mhtml → mht, .rtf → rtf, .txt → text; anything else is treated as html. Complete documents are stored byte-for-byte (their own charset applies). Alias: path.",
+      "aliases": [
+        "path"
+      ],
+      "add": true,
+      "set": false,
+      "get": false,
+      "examples": [
+        "--prop src=report.html",
+        "--prop src=letter.rtf"
+      ],
+      "enforcement": "report"
+    },
+    "format": {
+      "type": "enum",
+      "values": [
+        "html",
+        "xhtml",
+        "mht",
+        "rtf",
+        "text"
+      ],
+      "description": "Payload format (sets the chunk part's content type). Default: inferred from the src extension, else html.",
+      "add": true,
+      "set": false,
+      "get": false,
+      "examples": [
+        "--prop format=rtf"
+      ],
+      "enforcement": "report"
+    },
+    "matchSrc": {
+      "type": "bool",
+      "description": "Writes <w:altChunkPr><w:matchSrc/></w:altChunkPr>: ask Word to keep the chunk's source formatting instead of adapting it to the destination document's styles.",
+      "add": true,
+      "set": false,
+      "get": false,
+      "examples": [
+        "--prop matchSrc=true"
+      ],
+      "enforcement": "report"
+    },
+    "title": {
+      "type": "string",
+      "description": "Optional <title> for the wrapper document generated around an HTML fragment. Ignored for complete documents and non-HTML formats.",
+      "add": true,
+      "set": false,
+      "get": false,
+      "examples": [
+        "--prop title='Quarterly report'"
+      ],
+      "enforcement": "report"
+    }
+  }
+}

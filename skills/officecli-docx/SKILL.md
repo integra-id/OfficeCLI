@@ -418,6 +418,8 @@ officecli add "$FILE" "/body/p[3]" --type footnote --prop text="See Appendix A f
 
 **Watermark.** `add / --type watermark --prop text="DRAFT" --prop color=BFBFBF --prop opacity=0.8` in one command (default opacity 0.5); `set /watermark --prop opacity=…` adjusts it later.
 
+**HTML chunks.** `add /body --type htmlchunk --prop html='<h2>…</h2><table>…</table>'` (or `--prop src=page.html`) embeds HTML verbatim as a Word `altChunk`; Word converts it to native content when the file is opened. It stays one opaque `/body/altChunk[N]` node until then (preview shows escaped source, text is not queryable), so prefer `--type markdown` / native adds when you need to edit or verify the content afterwards. Also takes `format=rtf|text|xhtml|mht` and `matchSrc=true`; `help docx htmlchunk`.
+
 **When to switch skills.** Stay in docx for chapter drafts, ≤ 3 footnotes, ≤ 2 equations, no bibliography/cross-refs. Switch to **`academic-paper`** for citation styles (APA / Chicago / IEEE / GB 7714), in-text↔reference auto-linking, numbered equations with `\ref`, "List of Figures", or auto-updating cross-refs. Switch to **`officecli-word-form`** when the document's purpose is **data capture** — fillable forms, contracts with user-fill slots, questionnaires, mail-merge templates (`<w:sdt>` content controls, `<w:ffData>`, `documentProtection=forms`).
 
 ### Raw-set escape hatch (L1 / L2 / L3)

@@ -111,9 +111,14 @@ public static partial class WordBatchEmitter
         catch { return; }
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // altChunk payloads replayed by EmitBody as `add htmlchunk`.
+        HashSet<string> replayedChunks;
+        try { replayedChunks = word.GetReplayableAltChunkPartUris(); }
+        catch { replayedChunks = new HashSet<string>(StringComparer.OrdinalIgnoreCase); }
         foreach (var uri in parts)
         {
             if (!seen.Add(uri)) continue;
+            if (replayedChunks.Contains(uri)) continue;
             // Relationship parts (.rels) are auto-managed by the SDK alongside
             // their owning part — skip uniformly. Without this, every emitted
             // part's `_rels/<name>.xml.rels` would also surface as a warning.

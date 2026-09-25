@@ -460,6 +460,24 @@ public partial class WordHandler
                 }
             }
 
+            // Clean up the AlternativeFormatImportPart (word/afchunkN.htm …)
+            // behind an HTML chunk — the removed altChunk itself or any nested
+            // in a removed table/cell. Reference-counted like charts above.
+            var removedChunks = element is AltChunk selfChunk
+                ? element.Descendants<AltChunk>().Prepend(selfChunk)
+                : element.Descendants<AltChunk>();
+            foreach (var chunk in removedChunks.ToList())
+            {
+                var chunkRid = chunk.Id?.Value;
+                if (string.IsNullOrEmpty(chunkRid)) continue;
+                int chunkRefCount = mainPart2.Document!.Descendants<AltChunk>()
+                    .Count(ac => ac.Id?.Value == chunkRid);
+                if (chunkRefCount <= 1)
+                {
+                    try { mainPart2.DeletePart(chunkRid); } catch { }
+                }
+            }
+
             // BUG-R3-09: clean up dead HyperlinkRelationship entries.
             // Each w:hyperlink carries an r:id pointing at a HyperlinkRelationship
             // (an external rel, NOT a part). Deleting the containing element

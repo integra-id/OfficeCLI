@@ -713,6 +713,7 @@ public static partial class WordBatchEmitter
         // their raw-set insertafter this element so they land in DOM order; a
         // leading marker (no prior element) prepends to the body instead.
         string? lastBodyAnchorXpath = null;
+        int altChunkIndex = 0;
         foreach (var child in bodyNode.Children)
         {
             switch (child.Type)
@@ -956,16 +957,38 @@ public static partial class WordBatchEmitter
                 case "altChunk":
                     // <w:altChunk r:id="…"/> embeds an alternate-format payload
                     // (HTML, RTF, plain text, …) by relationship into the body.
-                    // The payload part itself surfaces in EmitAuxiliaryPartsScan
-                    // as an `auxiliaryPart` warning, but the body element that
-                    // references it would otherwise drop silently — emit a
-                    // dedicated warning so the loss is visible in the
-                    // dump-warning bundle without the user having to correlate
-                    // the aux-part path back to a missing body reference.
-                    ctx.Warnings.Add(new DocxUnsupportedWarning(
-                        Element: "altChunk",
-                        Path: child.Path,
-                        Reason: "alternate-format chunk reference dropped on dump (no curated emit path; the referenced payload part is reported separately)"));
+                    // Text payloads replay through `add htmlchunk`, which
+                    // recreates both the part and the reference; the aux-part
+                    // scan skips those parts (GetReplayableAltChunkPartUris).
+                    // Anything else (e.g. an embedded .docx chunk) warns so the
+                    // loss is visible in the dump-warning bundle.
+                    {
+                        var chunk = word.ReadAltChunkForDump(child.Path);
+                        if (chunk is { } c)
+                        {
+                            var chunkProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                            if (c.Format is "html" or "xhtml") chunkProps["html"] = c.Content;
+                            else chunkProps["content"] = c.Content;
+                            if (c.Format != "html") chunkProps["format"] = c.Format;
+                            if (c.MatchSrc) chunkProps["matchSrc"] = "true";
+                            items.Add(new BatchItem
+                            {
+                                Command = "add",
+                                Parent = "/body",
+                                Type = "htmlchunk",
+                                Props = chunkProps
+                            });
+                            altChunkIndex++;
+                            lastBodyAnchorXpath = $"/w:document/w:body/w:altChunk[{altChunkIndex}]";
+                        }
+                        else
+                        {
+                            ctx.Warnings.Add(new DocxUnsupportedWarning(
+                                Element: "altChunk",
+                                Path: child.Path,
+                                Reason: "alternate-format chunk reference dropped on dump (payload is not a text format htmlchunk can replay; the referenced payload part is reported separately)"));
+                        }
+                    }
                     break;
                 default:
                     // Unknown body-level child types — skip for v0.5.
