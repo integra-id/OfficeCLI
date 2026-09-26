@@ -60,8 +60,10 @@ officecli add "$FILE" /body --type paragraph \
 # ============================================================
 # Table of contents — references the Heading1/Heading2 paras below
 # Features: TOC field over heading levels 1-3, clickable, with page numbers,
-#           captioned "Contents". Inserts a TOC complex field; Word rebuilds
-#           the rendered entries on open.
+#           captioned "Contents". Inserts a TOC complex field. Word rebuilds
+#           the rendered entries on open (updateFields=true above). Headless,
+#           `officecli refresh "$FILE" --toc` fills entry titles and hyperlinks
+#           immediately; PAGEREF page numbers stay the placeholder 0.
 # ============================================================
 officecli add "$FILE" /body --type toc \
     --prop title="Contents" --prop levels=1-3 \

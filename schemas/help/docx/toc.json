@@ -14,7 +14,7 @@
   "paths": {
     "positional": ["/toc", "/tableofcontents"]
   },
-  "note": "Aliases: tableofcontents. Inserts a TOC field (complex fldChar). Word rebuilds the rendered entries on open unless 'pre-render' is used.",
+  "note": "Aliases: tableofcontents. Inserts a TOC field (complex fldChar). The cached result stays empty until `officecli refresh <file> --toc`, which rebuilds entries from Heading styles and outline levels (titles and in-document hyperlinks) without Microsoft Word. PAGEREF page numbers are the placeholder 0 on that path. Real page numbers need Word (or `officecli refresh` without --toc when a headless browser can paginate the HTML preview). `\\z` in the field means pageNumbers=false for this writer, not Word's web-layout switch.",
   "properties": {
     "levels": {
       "type": "string",

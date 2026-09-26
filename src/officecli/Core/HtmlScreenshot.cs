@@ -59,9 +59,19 @@ internal static class HtmlScreenshot
             foreach (var a in args) psi.ArgumentList.Add(a);
             using var p = Process.Start(psi);
             if (p == null) return null;
-            var stdout = p.StandardOutput.ReadToEnd();
-            if (!p.WaitForExit(timeoutMs)) { try { p.Kill(true); } catch { } return null; }
-            return stdout;
+            // Read both pipes. A synchronous ReadToEnd on stdout deadlocks
+            // when Chrome fills the stderr buffer, and the timeout below
+            // never runs — refresh then never returns the TOC entries it
+            // already wrote.
+            var outTask = p.StandardOutput.ReadToEndAsync();
+            var errTask = p.StandardError.ReadToEndAsync();
+            if (!p.WaitForExit(timeoutMs))
+            {
+                try { p.Kill(true); } catch { }
+                return null;
+            }
+            _ = errTask.GetAwaiter().GetResult();
+            return outTask.GetAwaiter().GetResult();
         }
         catch { return null; }
     }
