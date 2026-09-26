@@ -182,6 +182,7 @@ static partial class CommandBuilder
         rootCommand.Add(BuildMoveCommand(jsonOption));
         rootCommand.Add(BuildSwapCommand(jsonOption));
         rootCommand.Add(BuildRefreshCommand(jsonOption));
+        rootCommand.Add(BuildMaterializeCommand(jsonOption));
         rootCommand.Add(BuildRawCommand(jsonOption));
         rootCommand.Add(BuildRawSetCommand(jsonOption));
         rootCommand.Add(BuildAddPartCommand(jsonOption));
