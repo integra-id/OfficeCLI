@@ -23,10 +23,13 @@ static partial class CommandBuilder
             "A data-URI image whose type the picture pipeline already accepts (png, jpeg, gif, bmp, tiff, emf, wmf) becomes an inline w:drawing; the alt attribute is the picture description. " +
             "webp, svg, video and iframe are not embedded. http(s) URLs are not downloaded and relative paths are not resolved — those images stay as alt text and do not fail the conversion. " +
             "A data URI that cannot be decoded is the same kind of warning (alt text kept); it does not trip --strict. " +
-            "A small CSS subset is honored (element, class, id, descendant and child selectors; text-align, background-color, margin, font). " +
+            "A small CSS subset is honored (element, class, id, descendant and child selectors; text-align, background-color, margin, font, and borders). " +
+            "CSS border, border-top/right/bottom/left, border-width, border-style, and border-color map to w:pBdr on paragraphs and callouts and to w:tcBorders on cells. " +
+            "solid, dashed, dotted, double, inset, and outset are kept; groove is drawn as inset and ridge as outset (a warning). " +
+            "Other line styles, border-radius, border-image, outline, and inline (span/code) borders are ignored (a warning for an unsupported style or width). " +
             "Scripts are dropped, and RTF/MHT chunks are left unchanged. " +
             "Formatting is written directly onto runs (matchSrc-style), and h1–h6 also reference Heading styles. " +
-            "Fidelity is not Word's HTML importer — float, flex, borders and media queries are not reproduced.");
+            "Fidelity is not Word's HTML importer — float, flex, grid, and media queries are not reproduced.");
         cmd.Add(fileArg);
         cmd.Add(strictOpt);
         cmd.Add(jsonOption);

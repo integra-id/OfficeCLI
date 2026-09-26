@@ -31,6 +31,12 @@ internal sealed class HtmlFlowParagraph : HtmlFlowBlock
     /// following items continue the same definition.</summary>
     public int? ListStart { get; set; }
     public bool HorizontalRule { get; set; }
+    /// <summary>
+    /// CSS border on this block, or inherited from a wrapper (div, blockquote)
+    /// when this paragraph is the one that draws it. Null when no side was set.
+    /// A nil side is explicit <c>none</c>/<c>hidden</c> and blocks inheritance.
+    /// </summary>
+    public HtmlFlowBorder? Border { get; set; }
 }
 
 internal sealed class HtmlFlowRun
@@ -64,6 +70,8 @@ internal sealed class HtmlFlowRun
 internal sealed class HtmlFlowTable : HtmlFlowBlock
 {
     public List<HtmlFlowRow> Rows { get; } = new();
+    /// <summary>CSS border on the <c>table</c> element itself (outer edges).</summary>
+    public HtmlFlowBorder? Border { get; set; }
 }
 
 internal sealed class HtmlFlowRow
@@ -79,6 +87,37 @@ internal sealed class HtmlFlowCell
     public int RowSpan { get; set; } = 1;
     public bool Header { get; set; }
     public string? Fill { get; set; }
+    /// <summary>CSS border on the cell, filled in from the row when a side is absent.</summary>
+    public HtmlFlowBorder? Border { get; set; }
+    /// <summary>CSS padding in twips. Emitted as <c>w:tcMar</c>, not as border space.</summary>
+    public HtmlFlowPadding? Padding { get; set; }
+}
+
+/// <summary>
+/// One CSS edge after the border shorthand has been resolved.
+/// <see cref="Style"/> is a Word line token (<c>single</c>, <c>dashed</c>,
+/// <c>dotted</c>, <c>double</c>, <c>inset</c>, <c>outset</c>, <c>nil</c>).
+/// <see cref="SizeEighths"/> is OOXML <c>w:sz</c> (eighths of a point).
+/// <see cref="Color"/> is <c>RRGGBB</c>, or null for <c>w:color="auto"</c>.
+/// <see cref="SpacePoints"/> is <c>w:space</c> from CSS padding, in points.
+/// A null edge means the property was absent. A <c>nil</c> edge was set to none.
+/// </summary>
+internal readonly record struct HtmlFlowBorderSide(string Style, int SizeEighths, string? Color, int? SpacePoints);
+
+/// <summary>The four physical CSS edges. Missing edges stay null.</summary>
+internal sealed class HtmlFlowBorder
+{
+    public HtmlFlowBorderSide? Top { get; set; }
+    public HtmlFlowBorderSide? Right { get; set; }
+    public HtmlFlowBorderSide? Bottom { get; set; }
+    public HtmlFlowBorderSide? Left { get; set; }
+    public bool Any => Top != null || Right != null || Bottom != null || Left != null;
+}
+
+/// <summary>CSS padding in twips. Null on an edge means that longhand was absent.</summary>
+internal readonly record struct HtmlFlowPadding(int? Top, int? Right, int? Bottom, int? Left)
+{
+    public bool Any => Top != null || Right != null || Bottom != null || Left != null;
 }
 
 internal sealed class HtmlChunkParseResult
@@ -96,10 +135,13 @@ internal sealed class HtmlChunkParseResult
 /// tiff, emf, wmf — the picture pipeline's raster types, not svg or webp),
 /// and a small CSS subset (element, class, id, descendant and child
 /// combinators; the properties listed above plus text-align,
-/// background-color, and margin). Remote and relative images, svg, webp,
-/// scripts, and layout CSS are reported and not embedded.
+/// background-color, margin, and borders). Remote and relative images, svg,
+/// webp, scripts, and layout CSS (float, flex, grid, media queries) are
+/// reported and not embedded. Border coverage is documented on
+/// <see cref="HtmlChunkParser"/>'s border helpers: physical shorthands and
+/// the Word line styles, not radius, image, outline, or inline borders.
 /// </summary>
-internal static class HtmlChunkParser
+internal static partial class HtmlChunkParser
 {
     public static HtmlChunkParseResult ParsePlainText(string text)
     {
@@ -123,16 +165,21 @@ internal static class HtmlChunkParser
     public static HtmlChunkParseResult ParseHtml(string html)
     {
         var result = new HtmlChunkParseResult();
-        var root = BuildDom(html);
+        var stats = new CssStats();
+        var root = BuildDom(html, stats);
         var sheet = new Stylesheet();
         int ignoredSelectors = 0;
         foreach (var style in Enumerate(root, n => n.Tag == "style"))
         {
             var css = string.Concat(style.Children.Where(c => c.IsText).Select(c => c.Text));
-            ignoredSelectors += sheet.AddCss(css);
+            ignoredSelectors += sheet.AddCss(css, stats);
         }
         if (ignoredSelectors > 0)
             result.Warnings.Add($"{ignoredSelectors} CSS selector(s) ignored (supported: element, class, id, descendant and child combinators)");
+        if (stats.BordersApproximated > 0)
+            result.Warnings.Add($"{stats.BordersApproximated} CSS border style(s) approximated (groove as inset, ridge as outset)");
+        if (stats.BordersIgnored > 0)
+            result.Warnings.Add($"{stats.BordersIgnored} CSS border declaration(s) ignored (unsupported style or width; supported styles: solid, dashed, dotted, double, inset, outset)");
 
         var conv = new Converter(sheet);
         var body = Enumerate(root, n => n.Tag == "body").FirstOrDefault();
@@ -168,7 +215,7 @@ internal static class HtmlChunkParser
         public Dictionary<string, string> Declarations { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
-    static HtmlNode BuildDom(string html)
+    static HtmlNode BuildDom(string html, CssStats stats)
     {
         var root = new HtmlNode { Tag = "#root" };
         var stack = new Stack<HtmlNode>();
@@ -199,7 +246,7 @@ internal static class HtmlChunkParser
                 node.Id = id;
             AbsorbPresentationalAttrs(node);
             if (node.Attrs.TryGetValue("style", out var style))
-                ParseDeclarations(style, node.Declarations);
+                ParseDeclarations(style, node.Declarations, stats);
             stack.Peek().Children.Add(node);
             if (!tok.SelfClosing && !IsVoid(tok.Name))
                 stack.Push(node);
@@ -417,7 +464,7 @@ internal static class HtmlChunkParser
     {
         public List<CssRule> Rules { get; } = new();
 
-        public int AddCss(string css)
+        public int AddCss(string css, CssStats? stats = null)
         {
             css = StripComments(css);
             int ignored = 0;
@@ -444,7 +491,7 @@ internal static class HtmlChunkParser
                 }
                 var body = css[(brace + 1)..(k - 1)];
                 var decls = new Dictionary<string, (string Value, bool Important)>(StringComparer.OrdinalIgnoreCase);
-                ParseDeclarations(body, decls);
+                ParseDeclarations(body, decls, stats);
                 foreach (var sel in SplitSelectors(selectorText))
                 {
                     if (!TryParseSelector(sel, out var compounds, out var childJoins))
@@ -596,14 +643,14 @@ internal static class HtmlChunkParser
         return true;
     }
 
-    static void ParseDeclarations(string body, Dictionary<string, string> dest)
+    static void ParseDeclarations(string body, Dictionary<string, string> dest, CssStats? stats = null)
     {
         var rich = new Dictionary<string, (string Value, bool Important)>(StringComparer.OrdinalIgnoreCase);
-        ParseDeclarations(body, rich);
+        ParseDeclarations(body, rich, stats);
         foreach (var kv in rich) dest[kv.Key] = kv.Value.Value;
     }
 
-    static void ParseDeclarations(string body, Dictionary<string, (string Value, bool Important)> dest)
+    static void ParseDeclarations(string body, Dictionary<string, (string Value, bool Important)> dest, CssStats? stats = null)
     {
         foreach (var piece in body.Split(';'))
         {
@@ -620,11 +667,28 @@ internal static class HtmlChunkParser
                 val = val[..bang].Trim();
             }
             if (val.Length == 0) continue;
+            if (TryExpandBorderOrPadding(prop, val, important, dest, stats))
+                continue;
+            if (IsBorderStyleLonghand(prop))
+            {
+                var style = val.Trim().ToLowerInvariant();
+                NoteBorderStyle(style, stats);
+                dest[prop] = (style, important);
+                continue;
+            }
+            if (IsBorderWidthLonghand(prop) && !IsBorderWidth(val))
+            {
+                if (stats != null) stats.BordersIgnored++;
+            }
+            else if (IsBorderColorLonghand(prop) && !IsBorderColor(val))
+            {
+                if (stats != null) stats.BordersIgnored++;
+            }
             dest[prop] = (val, important);
         }
     }
 
-    sealed class Converter
+    sealed partial class Converter
     {
         readonly Stylesheet _sheet;
         public int ImagesRemote, ImagesLocal, ImagesUnsupported, ImagesInvalid, Objects, Scripts;
@@ -703,7 +767,11 @@ internal static class HtmlChunkParser
 
         HtmlFlowTable ConvertTable(HtmlNode table, FlowFormat parent, int listLevel)
         {
-            var flow = new HtmlFlowTable();
+            var flow = new HtmlFlowTable
+            {
+                // Outer edges only. Cell borders are resolved per td/th.
+                Border = ResolveBorder(table, parent.SizePt ?? 11, includeSpace: false),
+            };
             foreach (var tr in CollectRows(table))
             {
                 var row = new HtmlFlowRow { Header = tr.Parent?.Tag == "thead" };
@@ -717,6 +785,8 @@ internal static class HtmlChunkParser
                         ColSpan = ClampSpan(cellNode, "colspan"),
                         RowSpan = ClampSpan(cellNode, "rowspan"),
                         Fill = OwnFill(cellNode),
+                        Border = CellBorder(cellNode, tr, cellFmt.SizePt ?? 11),
+                        Padding = CellPadding(cellNode, tr, cellFmt.SizePt ?? 11),
                     };
                     EmitContainer(cellNode, cellFmt, cell.Blocks, listLevel, inPre: false);
                     if (cell.Blocks.Count == 0)
@@ -812,6 +882,9 @@ internal static class HtmlChunkParser
             para.FirstLineTwips = LengthTwips(Own(node, "text-indent"), fmt.SizePt ?? 11);
             para.SpaceBeforeTwips = MarginEdge(node, fmt, top: true);
             para.SpaceAfterTwips = MarginEdge(node, fmt, top: false);
+            // A cell's own border is w:tcBorders. Direct text in a td is still
+            // flushed as a paragraph of that td, so don't also paint pBdr.
+            para.Border = ParagraphBorder(node, fmt.SizePt ?? 11);
             return para;
         }
 
@@ -1195,6 +1268,9 @@ internal static class HtmlChunkParser
             pt = inches * 72;
         else if (value.EndsWith("cm", StringComparison.Ordinal) && double.TryParse(value[..^2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var cm))
             pt = cm / 2.54 * 72;
+        else if (value.EndsWith("mm", StringComparison.Ordinal) && value.Length > 2
+            && double.TryParse(value[..^2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mm))
+            pt = mm / 25.4 * 72;
         else return null;
         return (int)Math.Round(pt * 20, MidpointRounding.AwayFromZero);
     }

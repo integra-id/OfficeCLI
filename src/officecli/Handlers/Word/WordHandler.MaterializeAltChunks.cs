@@ -93,12 +93,15 @@ public partial class WordHandler
     /// http(s) and relative URLs are not downloaded or read from disk — they
     /// stay as alt text, and a data URI that fails to decode does the same.
     /// Those picture warnings do not trip <paramref name="strict"/> and do
-    /// not stop the rest of the chunk. Scripts are dropped, and most layout
-    /// CSS (float, flex, borders, media queries) is ignored. Source formatting
-    /// is written as direct formatting — the same idea as
-    /// <c>w:altChunkPr/w:matchSrc</c> — rather than mapped onto the
-    /// destination styles. Heading elements also reference Heading1–Heading6
-    /// so an outline still works.
+    /// not stop the rest of the chunk. Scripts are dropped, and layout CSS
+    /// (float, flex, grid, media queries) is ignored. CSS borders are not:
+    /// a paragraph or callout becomes <c>w:pBdr</c>, a table cell becomes
+    /// <c>w:tcBorders</c>, and a uniform cell grid also replaces
+    /// <c>w:tblBorders</c>. An unsupported line style is a warning and does
+    /// not trip <paramref name="strict"/>. Source formatting is written as
+    /// direct formatting — the same idea as <c>w:altChunkPr/w:matchSrc</c> —
+    /// rather than mapped onto the destination styles. Heading elements also
+    /// reference Heading1–Heading6 so an outline still works.
     /// </summary>
     public AltChunkMaterializeReport MaterializeAltChunks(bool strict = false)
     {
@@ -305,6 +308,8 @@ public partial class WordHandler
             pPr.ParagraphBorders = new ParagraphBorders(
                 new BottomBorder { Val = BorderValues.Single, Size = 12, Space = 1, Color = "auto" });
         }
+        else if (ParagraphBordersFrom(flow.Border) is { } cssBorders)
+            pPr.ParagraphBorders = cssBorders;
         if (!string.IsNullOrEmpty(flow.Fill))
             pPr.Shading = new Shading { Val = ShadingPatternValues.Clear, Fill = flow.Fill };
         if (flow.SpaceBeforeTwips != null || flow.SpaceAfterTwips != null)
@@ -511,13 +516,7 @@ public partial class WordHandler
         var table = new Table();
         var tblPr = new TableProperties();
         tblPr.TableWidth = new TableWidth { Width = "5000", Type = TableWidthUnitValues.Pct };
-        tblPr.TableBorders = new TableBorders(
-            new TopBorder { Val = BorderValues.Single, Size = 4, Space = 0, Color = "auto" },
-            new LeftBorder { Val = BorderValues.Single, Size = 4, Space = 0, Color = "auto" },
-            new BottomBorder { Val = BorderValues.Single, Size = 4, Space = 0, Color = "auto" },
-            new RightBorder { Val = BorderValues.Single, Size = 4, Space = 0, Color = "auto" },
-            new InsideHorizontalBorder { Val = BorderValues.Single, Size = 4, Space = 0, Color = "auto" },
-            new InsideVerticalBorder { Val = BorderValues.Single, Size = 4, Space = 0, Color = "auto" });
+        tblPr.TableBorders = TableBordersFor(flow);
         table.AppendChild(tblPr);
         var grid = new TableGrid();
         for (int i = 0; i < cols; i++)
@@ -555,7 +554,8 @@ public partial class WordHandler
     {
         var tc = new TableCell();
         tc.AppendChild(CellProperties(slot.Cell.ColSpan, colW, slot.Cell.Fill,
-            slot.Cell.RowSpan > 1 ? MergedCellValues.Restart : null));
+            slot.Cell.RowSpan > 1 ? MergedCellValues.Restart : null,
+            slot.Cell.Border, slot.Cell.Padding));
         foreach (var block in slot.Cell.Blocks)
         {
             var el = CreateFlowBlock(block, main, linkRels, ref droppedLinks, pictureIds, warnings);
@@ -575,7 +575,8 @@ public partial class WordHandler
     TableCell ContinueCell(CellSlot slot, int colW)
     {
         var tc = new TableCell();
-        tc.AppendChild(CellProperties(slot.ColSpan, colW, slot.Cell.Fill, MergedCellValues.Continue));
+        tc.AppendChild(CellProperties(slot.ColSpan, colW, slot.Cell.Fill, MergedCellValues.Continue,
+            slot.Cell.Border, slot.Cell.Padding));
         var para = new Paragraph();
         AssignParaId(para);
         tc.AppendChild(para);
@@ -592,16 +593,176 @@ public partial class WordHandler
         return tc;
     }
 
-    static TableCellProperties CellProperties(int colSpan, int colW, string? fill, MergedCellValues? merge)
+    static TableCellProperties CellProperties(int colSpan, int colW, string? fill, MergedCellValues? merge,
+        HtmlFlowBorder? border = null, HtmlFlowPadding? padding = null)
     {
         var tcPr = new TableCellProperties();
         int span = Math.Max(1, colSpan);
         tcPr.TableCellWidth = new TableCellWidth { Width = (colW * span).ToString(), Type = TableWidthUnitValues.Dxa };
         if (span > 1) tcPr.GridSpan = new GridSpan { Val = span };
         if (merge != null) tcPr.VerticalMerge = new VerticalMerge { Val = merge.Value };
+        // CT_TcPr order: tcW, gridSpan, vMerge, tcBorders, shd, tcMar.
+        if (CellBordersFrom(border) is { } tcBorders)
+            tcPr.TableCellBorders = tcBorders;
         if (!string.IsNullOrEmpty(fill))
             tcPr.Shading = new Shading { Val = ShadingPatternValues.Clear, Fill = fill };
+        if (CellMarginFrom(padding) is { } mar)
+            tcPr.TableCellMargin = mar;
         return tcPr;
+    }
+
+    /// <summary>
+    /// Paragraph borders skip nil sides (no line is the same as omitting the
+    /// edge). <see cref="MakeBorder"/> writes <c>w:sz</c> and <c>w:color</c>.
+    /// Padding on that edge becomes <c>w:space</c> in points.
+    /// </summary>
+    static ParagraphBorders? ParagraphBordersFrom(HtmlFlowBorder? border)
+    {
+        if (border == null || !border.Any) return null;
+        var children = new List<OpenXmlElement>();
+        AddEdge<TopBorder>(children, border.Top, emitNil: false, withSpace: true);
+        AddEdge<LeftBorder>(children, border.Left, emitNil: false, withSpace: true);
+        AddEdge<BottomBorder>(children, border.Bottom, emitNil: false, withSpace: true);
+        AddEdge<RightBorder>(children, border.Right, emitNil: false, withSpace: true);
+        return children.Count == 0 ? null : new ParagraphBorders(children);
+    }
+
+    /// <summary>
+    /// Cell borders keep an explicit nil so <c>border: none</c> covers the
+    /// table grid. Unspecified sides are omitted and fall through to
+    /// <c>w:tblBorders</c>.
+    /// </summary>
+    static TableCellBorders? CellBordersFrom(HtmlFlowBorder? border)
+    {
+        if (border == null || !border.Any) return null;
+        var children = new List<OpenXmlElement>();
+        AddEdge<TopBorder>(children, border.Top, emitNil: true, withSpace: false);
+        AddEdge<LeftBorder>(children, border.Left, emitNil: true, withSpace: false);
+        AddEdge<BottomBorder>(children, border.Bottom, emitNil: true, withSpace: false);
+        AddEdge<RightBorder>(children, border.Right, emitNil: true, withSpace: false);
+        return children.Count == 0 ? null : new TableCellBorders(children);
+    }
+
+    static TableCellMargin? CellMarginFrom(HtmlFlowPadding? padding)
+    {
+        if (padding is not { } pad || !pad.Any) return null;
+        var children = new List<OpenXmlElement>();
+        AddMargin<TopMargin>(children, pad.Top);
+        AddMargin<LeftMargin>(children, pad.Left);
+        AddMargin<BottomMargin>(children, pad.Bottom);
+        AddMargin<RightMargin>(children, pad.Right);
+        return children.Count == 0 ? null : new TableCellMargin(children);
+    }
+
+    static void AddMargin<T>(List<OpenXmlElement> children, int? twips) where T : TableWidthType, new()
+    {
+        if (twips == null) return;
+        children.Add(new T
+        {
+            Width = Math.Max(0, twips.Value).ToString(CultureInfo.InvariantCulture),
+            Type = TableWidthUnitValues.Dxa,
+        });
+    }
+
+    /// <summary>
+    /// A grid where every cell carries the same four-edge border replaces the
+    /// built-in table borders (including insideH/insideV) so the CSS color is
+    /// the grid. Otherwise the table element's own border paints the outside
+    /// and the built-in single grid stays as the fallback.
+    /// </summary>
+    static TableBorders TableBordersFor(HtmlFlowTable flow)
+    {
+        if (TryUniformCellBorder(flow, out var side))
+            return new TableBorders(
+                FlowBorder<TopBorder>(side, withSpace: false),
+                FlowBorder<LeftBorder>(side, withSpace: false),
+                FlowBorder<BottomBorder>(side, withSpace: false),
+                FlowBorder<RightBorder>(side, withSpace: false),
+                FlowBorder<InsideHorizontalBorder>(side, withSpace: false),
+                FlowBorder<InsideVerticalBorder>(side, withSpace: false));
+
+        if (flow.Border == null || !flow.Border.Any)
+            return DefaultTableBorders();
+
+        return new TableBorders(
+            TableEdge<TopBorder>(flow.Border.Top),
+            TableEdge<LeftBorder>(flow.Border.Left),
+            TableEdge<BottomBorder>(flow.Border.Bottom),
+            TableEdge<RightBorder>(flow.Border.Right),
+            DefaultEdge<InsideHorizontalBorder>(),
+            DefaultEdge<InsideVerticalBorder>());
+    }
+
+    static bool TryUniformCellBorder(HtmlFlowTable flow, out HtmlFlowBorderSide side)
+    {
+        side = default;
+        bool any = false;
+        foreach (var row in flow.Rows)
+        {
+            if (row.Cells.Count == 0) return false;
+            foreach (var cell in row.Cells)
+            {
+                if (cell.Border == null || !UniformBox(cell.Border, out var box))
+                    return false;
+                if (!any)
+                {
+                    side = box;
+                    any = true;
+                }
+                else if (!SameBorder(side, box))
+                    return false;
+            }
+        }
+        return any;
+    }
+
+    static bool UniformBox(HtmlFlowBorder border, out HtmlFlowBorderSide side)
+    {
+        side = default;
+        if (border.Top == null || border.Right == null || border.Bottom == null || border.Left == null)
+            return false;
+        if (!SameBorder(border.Top.Value, border.Right.Value)
+            || !SameBorder(border.Top.Value, border.Bottom.Value)
+            || !SameBorder(border.Top.Value, border.Left.Value))
+            return false;
+        side = border.Top.Value;
+        return true;
+    }
+
+    static bool SameBorder(HtmlFlowBorderSide a, HtmlFlowBorderSide b) =>
+        a.Style == b.Style && a.SizeEighths == b.SizeEighths
+        && string.Equals(a.Color, b.Color, StringComparison.OrdinalIgnoreCase);
+
+    static TableBorders DefaultTableBorders() => new(
+        DefaultEdge<TopBorder>(),
+        DefaultEdge<LeftBorder>(),
+        DefaultEdge<BottomBorder>(),
+        DefaultEdge<RightBorder>(),
+        DefaultEdge<InsideHorizontalBorder>(),
+        DefaultEdge<InsideVerticalBorder>());
+
+    static T DefaultEdge<T>() where T : BorderType, new() =>
+        new() { Val = BorderValues.Single, Size = 4, Space = 0, Color = "auto" };
+
+    static T TableEdge<T>(HtmlFlowBorderSide? side) where T : BorderType, new() =>
+        side == null ? DefaultEdge<T>() : FlowBorder<T>(side.Value, withSpace: false);
+
+    static void AddEdge<T>(List<OpenXmlElement> children, HtmlFlowBorderSide? side, bool emitNil, bool withSpace)
+        where T : BorderType, new()
+    {
+        if (side == null) return;
+        if (side.Value.Style == "nil" && !emitNil) return;
+        children.Add(FlowBorder<T>(side.Value, withSpace));
+    }
+
+    static T FlowBorder<T>(HtmlFlowBorderSide side, bool withSpace) where T : BorderType, new()
+    {
+        if (side.Style == "nil")
+            return MakeBorder<T>(BorderValues.Nil, 0, null, null);
+        uint? space = withSpace && side.SpacePoints is int sp && sp > 0 ? (uint)sp : null;
+        var color = string.IsNullOrEmpty(side.Color) ? "auto" : side.Color;
+        var size = (uint)Math.Clamp(side.SizeEighths, 1, 255);
+        return MakeBorder<T>(ParseBorderStyle(side.Style), size, color, space);
     }
 
     /// <summary>wp:docPr ids already used in the package, plus the next free id.</summary>
