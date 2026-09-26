@@ -62,6 +62,27 @@ echo "$XML" | grep -q 'w:gridSpan' || fail "colspan was not emitted as gridSpan"
 echo "$XML" | grep -q 'w:hyperlink' || fail "hyperlink missing"
 echo "$XML" | grep -q 'w:numPr' || fail "list numbering missing"
 echo "$XML" | grep -Eq '<w:ilvl w:val="0"[[:space:]]*/>' || fail "top-level list should be ilvl 0"
+python3 - "$SIMPLE" <<'PY' || fail "flat list items should share one numId"
+import sys, zipfile
+import xml.etree.ElementTree as ET
+W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+root = ET.fromstring(zipfile.ZipFile(sys.argv[1]).read("word/document.xml"))
+
+def text_of(el):
+    return "".join(t.text or "" for t in el.iter(W + "t"))
+
+nums = []
+for p in root.iter(W + "p"):
+    if text_of(p).strip() not in ("one", "two"):
+        continue
+    num = p.find(f"{W}pPr/{W}numPr/{W}numId")
+    ilvl = p.find(f"{W}pPr/{W}numPr/{W}ilvl")
+    if num is None or ilvl is None or ilvl.get(W + "val") != "0":
+        sys.exit(f"missing ilvl 0 on {text_of(p)!r}")
+    nums.append(num.get(W + "val"))
+if len(nums) != 2 or nums[0] != nums[1]:
+    sys.exit(f"numIds {nums}")
+PY
 unzip -p "$SIMPLE" word/_rels/document.xml.rels | grep -q 'example.com/docs' || fail "hyperlink relationship missing"
 python3 - "$SIMPLE" <<'PY' || fail "afchunk content type still registered"
 import sys, zipfile
@@ -94,6 +115,55 @@ echo "$SXML" | grep -q 'w:vMerge' || fail "report rowspan missing"
 echo "$SXML" | grep -q 'Jakarta' || fail "table text missing"
 echo "$SXML" | grep -Eq '<w:ilvl w:val="0"[[:space:]]*/>' || fail "top-level ordered list should be ilvl 0"
 echo "$SXML" | grep -Eq '<w:ilvl w:val="1"[[:space:]]*/>' || fail "nested list should be ilvl 1"
+python3 - "$STYLED" <<'PY' || fail "report nested list should share one numId"
+import sys, zipfile
+import xml.etree.ElementTree as ET
+W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+z = zipfile.ZipFile(sys.argv[1])
+root = ET.fromstring(z.read("word/document.xml"))
+numbering = ET.fromstring(z.read("word/numbering.xml"))
+
+def text_of(el):
+    return "".join(t.text or "" for t in el.iter(W + "t"))
+
+want = {
+    "Evaluasi harga di wilayah Medan": 0,
+    "Bandingkan dengan harga pesaing": 1,
+    "Uji promo bundling selama 4 minggu": 1,
+    "Perluas tim penjualan Makassar": 0,
+    "Luncurkan kanal daring untuk Surabaya": 0,
+}
+found = {}
+for p in root.iter(W + "p"):
+    text = text_of(p)
+    for label, ilvl in want.items():
+        if label not in text:
+            continue
+        num = p.find(f"{W}pPr/{W}numPr/{W}numId")
+        got = p.find(f"{W}pPr/{W}numPr/{W}ilvl")
+        if num is None or got is None or got.get(W + "val") != str(ilvl):
+            sys.exit(f"{label}: ilvl {None if got is None else got.get(W + 'val')}")
+        found[label] = num.get(W + "val")
+missing = [k for k in want if k not in found]
+if missing:
+    sys.exit("missing " + ", ".join(missing))
+ids = set(found.values())
+if len(ids) != 1:
+    sys.exit(f"report list split across numIds: {found}")
+num_id = ids.pop()
+abs_id = None
+for num in numbering.findall(W + "num"):
+    if num.get(W + "numId") == num_id:
+        abs_id = num.find(W + "abstractNumId").get(W + "val")
+formats = {}
+for abstract in numbering.findall(W + "abstractNum"):
+    if abstract.get(W + "abstractNumId") != abs_id:
+        continue
+    for lvl in abstract.findall(W + "lvl"):
+        formats[lvl.get(W + "ilvl")] = lvl.find(W + "numFmt").get(W + "val")
+if formats.get("0") != "decimal" or formats.get("1") != "bullet":
+    sys.exit(f"report markers: {formats}")
+PY
 python3 - "$STYLED" <<'PY' || fail "report borders were not mapped onto w:pBdr / w:tcBorders"
 import sys, zipfile
 import xml.etree.ElementTree as ET
@@ -395,5 +465,213 @@ if "relationships/image" not in rels:
     sys.exit("document rels have no image relationship")
 PY
 "$OFFICECLI" validate "$IMG" >/dev/null
+
+echo "== nested lists share one numId; sibling lists do not =="
+LISTS="$WORK/lists.docx"
+cat > "$WORK/lists.html" <<'HTML'
+<ol>
+  <li>OL-P1
+    <ol>
+      <li>OL-C1</li>
+      <li>OL-C2
+        <ul><li>UL-D1</li></ul>
+      </li>
+    </ol>
+  </li>
+  <li>OL-P2
+    <p>NOTE-X</p>
+    <ol><li>OL-AFTER</li></ol>
+  </li>
+  <li>OL-P3</li>
+</ol>
+<p>SPLIT-P</p>
+<ul>
+  <li>SIB-A</li>
+  <li>SIB-B
+    <ul><li>SIB-N</li></ul>
+  </li>
+</ul>
+<ol><li>SOLO-A</li></ol>
+<ol><li>SOLO-B</li></ol>
+<ol start="4"><li>START4</li></ol>
+<ol>
+  <li>NS-OUTER
+    <ol start="3"><li>NS-THREE</li><li>NS-FOUR</li></ol>
+    <ol start="8"><li>NS-LATER</li></ol>
+  </li>
+  <li>NS-AGAIN</li>
+</ol>
+<ul>
+  <li>WRAP-P
+    <div><ol><li>WRAP-C</li></ol></div>
+  </li>
+</ul>
+<ol>
+  <li>INLI-P
+    <table><tr><td><ul><li>INLI-CELL</li></ul></td></tr></table>
+  </li>
+  <li>INLI-NEXT</li>
+</ol>
+<table><tr><td>
+  <ol><li>CELL-1</li><li>CELL-2</li></ol>
+  <ul><li>CELL-B</li></ul>
+</td></tr></table>
+HTML
+"$OFFICECLI" create "$LISTS"
+"$OFFICECLI" add "$LISTS" /body --type htmlchunk --prop src="$WORK/lists.html"
+"$OFFICECLI" materialize "$LISTS"
+python3 - "$LISTS" <<'PY' || fail "nested list numId/ilvl did not match one multilevel instance"
+import sys, zipfile
+import xml.etree.ElementTree as ET
+W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+z = zipfile.ZipFile(sys.argv[1])
+root = ET.fromstring(z.read("word/document.xml"))
+numbering = ET.fromstring(z.read("word/numbering.xml"))
+
+def text_of(el):
+    return "".join(t.text or "" for t in el.iter(W + "t"))
+
+paras = []
+for p in root.iter(W + "p"):
+    text = text_of(p).strip()
+    pPr = p.find(W + "pPr")
+    numPr = pPr.find(W + "numPr") if pPr is not None else None
+    if numPr is None:
+        paras.append((text, None))
+        continue
+    ilvl_el = numPr.find(W + "ilvl")
+    num_el = numPr.find(W + "numId")
+    ilvl = int(ilvl_el.get(W + "val")) if ilvl_el is not None else 0
+    paras.append((text, (int(num_el.get(W + "val")), ilvl)))
+
+def need(label):
+    hits = [v for t, v in paras if label in t]
+    if len(hits) != 1:
+        sys.exit(f"{label}: expected 1 paragraph, found {hits}")
+    return hits[0]
+
+def expect(label, num, ilvl):
+    got = need(label)
+    if got != (num, ilvl):
+        sys.exit(f"{label}: {got} != {(num, ilvl)}")
+
+def expect_plain(label):
+    got = need(label)
+    if got is not None:
+        sys.exit(f"{label} should not be numbered, got {got}")
+
+def abstract_of(num_id):
+    num = next((n for n in numbering.findall(W + "num") if n.get(W + "numId") == str(num_id)), None)
+    if num is None:
+        sys.exit(f"w:num {num_id} missing")
+    abs_id = num.find(W + "abstractNumId").get(W + "val")
+    abstract = next((a for a in numbering.findall(W + "abstractNum") if a.get(W + "abstractNumId") == abs_id), None)
+    if abstract is None:
+        sys.exit(f"abstractNum {abs_id} missing")
+    return num, abstract
+
+def level_of(num_id, ilvl):
+    _, abstract = abstract_of(num_id)
+    lvl = next((l for l in abstract.findall(W + "lvl") if l.get(W + "ilvl") == str(ilvl)), None)
+    if lvl is None:
+        sys.exit(f"num {num_id} ilvl {ilvl} missing")
+    fmt = lvl.find(W + "numFmt").get(W + "val")
+    start = lvl.find(W + "start")
+    return fmt, None if start is None else start.get(W + "val")
+
+def start_override(num_id, ilvl):
+    num, _ = abstract_of(num_id)
+    for o in num.findall(W + "lvlOverride"):
+        if o.get(W + "ilvl") != str(ilvl):
+            continue
+        so = o.find(W + "startOverride")
+        return None if so is None else so.get(W + "val")
+    return None
+
+tree = need("OL-P1")
+if tree is None:
+    sys.exit("OL-P1 is not numbered")
+num = tree[0]
+expect("OL-P1", num, 0)
+expect("OL-C1", num, 1)
+expect("OL-C2", num, 1)
+expect("UL-D1", num, 2)
+expect("OL-P2", num, 0)
+expect_plain("NOTE-X")
+expect("OL-AFTER", num, 1)
+expect("OL-P3", num, 0)
+if level_of(num, 0)[0] != "decimal":
+    sys.exit(f"ol depth 0: {level_of(num, 0)}")
+if level_of(num, 1)[0] != "lowerLetter":
+    sys.exit(f"ol depth 1: {level_of(num, 1)}")
+if level_of(num, 2)[0] != "bullet":
+    sys.exit(f"ul depth 2: {level_of(num, 2)}")
+
+sib = need("SIB-A")
+if sib is None or sib[0] == num:
+    sys.exit(f"sibling bullet list joined the ordered tree: {sib}")
+expect("SIB-A", sib[0], 0)
+expect("SIB-N", sib[0], 1)
+if level_of(sib[0], 0)[0] != "bullet" or level_of(sib[0], 1)[0] != "bullet":
+    sys.exit(f"sibling bullet cycle: {level_of(sib[0], 0)} {level_of(sib[0], 1)}")
+
+solo_a = need("SOLO-A")
+solo_b = need("SOLO-B")
+if solo_a is None or solo_b is None or len({solo_a[0], solo_b[0], num, sib[0]}) != 4:
+    sys.exit(f"adjacent lists were merged: A={solo_a} B={solo_b} tree={num} sib={sib[0]}")
+expect("SOLO-A", solo_a[0], 0)
+expect("SOLO-B", solo_b[0], 0)
+taken = {num, sib[0], solo_a[0], solo_b[0]}
+
+started = need("START4")
+if started is None or started[0] in taken:
+    sys.exit(f"start=4 list reused another numId: {started}")
+if level_of(started[0], 0) != ("decimal", "4"):
+    sys.exit(f"outer start=4: {level_of(started[0], 0)}")
+taken.add(started[0])
+
+ns = need("NS-OUTER")
+if ns is None or ns[0] in taken:
+    sys.exit(f"nested-start list joined another tree: {ns}")
+expect("NS-OUTER", ns[0], 0)
+expect("NS-THREE", ns[0], 1)
+expect("NS-FOUR", ns[0], 1)
+expect("NS-LATER", ns[0], 1)
+expect("NS-AGAIN", ns[0], 0)
+if start_override(ns[0], 1) != "3":
+    sys.exit(f"nested start override: {start_override(ns[0], 1)} (first start=3 wins over later start=8)")
+if level_of(ns[0], 1)[0] != "lowerLetter":
+    sys.exit(f"nested ol marker: {level_of(ns[0], 1)}")
+
+taken.add(ns[0])
+wrap = need("WRAP-P")
+if wrap is None or wrap[0] in taken:
+    sys.exit(f"wrapped list joined another tree: {wrap}")
+expect("WRAP-P", wrap[0], 0)
+expect("WRAP-C", wrap[0], 1)
+if level_of(wrap[0], 0)[0] != "bullet" or level_of(wrap[0], 1)[0] != "lowerLetter":
+    sys.exit(f"div-wrapped ol under ul: {level_of(wrap[0], 0)} {level_of(wrap[0], 1)}")
+
+taken.add(wrap[0])
+inli = need("INLI-P")
+cell_in = need("INLI-CELL")
+if inli is None or cell_in is None or inli[0] == cell_in[0] or inli[0] in taken:
+    sys.exit(f"list in a cell inside an li joined the outer list: {inli} {cell_in}")
+expect("INLI-P", inli[0], 0)
+expect("INLI-NEXT", inli[0], 0)
+expect("INLI-CELL", cell_in[0], 0)
+
+cell = need("CELL-1")
+if cell is None or cell[0] in taken or cell[0] in (inli[0], cell_in[0]):
+    sys.exit(f"cell list joined a body list: {cell}")
+expect("CELL-1", cell[0], 0)
+expect("CELL-2", cell[0], 0)
+cell_b = need("CELL-B")
+if cell_b is None or cell_b[0] == cell[0]:
+    sys.exit(f"second list in the same cell was merged: {cell_b}")
+expect("CELL-B", cell_b[0], 0)
+expect_plain("SPLIT-P")
+PY
+"$OFFICECLI" validate "$LISTS" >/dev/null
 
 echo "SMOKE OK"

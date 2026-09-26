@@ -30,6 +30,13 @@ internal sealed class HtmlFlowParagraph : HtmlFlowBlock
     /// <summary>Numbering start. Set only on the first item of a list so the
     /// following items continue the same definition.</summary>
     public int? ListStart { get; set; }
+    /// <summary>
+    /// One nested list tree. The outermost <c>ul</c>/<c>ol</c> and every list
+    /// inside its items share an id so materialize can bind them to one Word
+    /// <c>numId</c>. A list that is not inside those items gets a new id.
+    /// Zero when this paragraph is not a list item.
+    /// </summary>
+    public int ListTree { get; set; }
     public bool HorizontalRule { get; set; }
     /// <summary>
     /// CSS border on this block, or inherited from a wrapper (div, blockquote)
@@ -184,7 +191,7 @@ internal static partial class HtmlChunkParser
         var conv = new Converter(sheet);
         var body = Enumerate(root, n => n.Tag == "body").FirstOrDefault();
         var start = body ?? root;
-        conv.EmitElement(start, FlowFormat.Empty, result.Blocks, listLevel: 0, inPre: false);
+        conv.EmitElement(start, FlowFormat.Empty, result.Blocks, ListContext.None, inPre: false);
         if (conv.ImagesRemote > 0)
             result.Warnings.Add($"{conv.ImagesRemote} image(s) kept as alt text (http(s) URL is not downloaded)");
         if (conv.ImagesLocal > 0)
@@ -688,17 +695,28 @@ internal static partial class HtmlChunkParser
         }
     }
 
+    /// <summary>
+    /// Where a list is being emitted. <see cref="InItem"/> means the list sits
+    /// inside an <c>li</c> (directly, or under a wrapper such as <c>div</c>).
+    /// <see cref="Tree"/> is the ancestor list's id; zero means there is none.
+    /// </summary>
+    readonly record struct ListContext(int Level, bool InItem, int Tree)
+    {
+        public static ListContext None => default;
+    }
+
     sealed partial class Converter
     {
         readonly Stylesheet _sheet;
         public int ImagesRemote, ImagesLocal, ImagesUnsupported, ImagesInvalid, Objects, Scripts;
+        int _nextListTree;
 
         public Converter(Stylesheet sheet)
         {
             _sheet = sheet;
         }
 
-        public void EmitElement(HtmlNode node, FlowFormat parent, List<HtmlFlowBlock> blocks, int listLevel, bool inPre)
+        public void EmitElement(HtmlNode node, FlowFormat parent, List<HtmlFlowBlock> blocks, ListContext ctx, bool inPre)
         {
             var tag = node.Tag;
             if (tag is null or "#root") return;
@@ -707,13 +725,15 @@ internal static partial class HtmlChunkParser
             var fmt = FormatOf(node, parent);
             if (tag is "ul" or "ol")
             {
-                ConvertList(node, fmt, blocks, listLevel);
+                ConvertList(node, fmt, blocks, ctx);
                 return;
             }
             if (tag == "table")
             {
-                EmitCaption(node, fmt, blocks, listLevel);
-                var table = ConvertTable(node, fmt, listLevel);
+                // A cell is its own block container. Lists there do not join
+                // a list that happens to contain the table.
+                EmitCaption(node, fmt, blocks);
+                var table = ConvertTable(node, fmt);
                 if (table.Rows.Count > 0) blocks.Add(table);
                 return;
             }
@@ -724,33 +744,37 @@ internal static partial class HtmlChunkParser
             }
             if (tag is "html" or "body")
             {
-                EmitContainer(node, fmt, blocks, listLevel, inPre: false);
+                EmitContainer(node, fmt, blocks, ctx, inPre: false);
                 return;
             }
-            EmitContainer(node, fmt, blocks, listLevel, inPre || tag == "pre");
+            EmitContainer(node, fmt, blocks, ctx, inPre || tag == "pre");
         }
 
-        void EmitCaption(HtmlNode table, FlowFormat fmt, List<HtmlFlowBlock> blocks, int listLevel)
+        void EmitCaption(HtmlNode table, FlowFormat fmt, List<HtmlFlowBlock> blocks)
         {
             var cap = table.Children.FirstOrDefault(c => c.Tag == "caption");
             if (cap == null) return;
-            EmitContainer(cap, FormatOf(cap, fmt), blocks, listLevel, inPre: false);
+            EmitContainer(cap, FormatOf(cap, fmt), blocks, ListContext.None, inPre: false);
         }
 
-        void ConvertList(HtmlNode list, FlowFormat parent, List<HtmlFlowBlock> blocks, int level)
+        void ConvertList(HtmlNode list, FlowFormat parent, List<HtmlFlowBlock> blocks, ListContext ctx)
         {
             var kind = list.Tag == "ol" ? "ordered" : "bullet";
             int start = 1;
             if (list.Attrs.TryGetValue("start", out var raw)
                 && int.TryParse(raw, out var n) && n > 0)
                 start = n;
+            // Inside an <li>, this list continues the ancestor tree one level
+            // deeper. Anywhere else (body, div, table cell) it is a new tree.
+            int level = Math.Clamp(ctx.InItem ? ctx.Level + 1 : ctx.Level, 0, 8);
+            int tree = ctx.InItem && ctx.Tree > 0 ? ctx.Tree : ++_nextListTree;
+            var itemCtx = new ListContext(level, true, tree);
             bool first = true;
-            int lvl = Math.Clamp(level, 0, 8);
             foreach (var child in list.Children)
             {
                 if (child.Tag != "li") continue;
                 var item = new List<HtmlFlowBlock>();
-                EmitContainer(child, FormatOf(child, parent), item, lvl, inPre: false);
+                EmitContainer(child, FormatOf(child, parent), item, itemCtx, inPre: false);
                 var marker = item.OfType<HtmlFlowParagraph>().FirstOrDefault(p => p.ListKind == null && !p.HorizontalRule);
                 if (marker == null)
                 {
@@ -758,14 +782,15 @@ internal static partial class HtmlChunkParser
                     item.Insert(0, marker);
                 }
                 marker.ListKind = kind;
-                marker.ListLevel = lvl;
+                marker.ListLevel = level;
+                marker.ListTree = tree;
                 if (first) marker.ListStart = start;
                 first = false;
                 blocks.AddRange(item);
             }
         }
 
-        HtmlFlowTable ConvertTable(HtmlNode table, FlowFormat parent, int listLevel)
+        HtmlFlowTable ConvertTable(HtmlNode table, FlowFormat parent)
         {
             var flow = new HtmlFlowTable
             {
@@ -788,7 +813,7 @@ internal static partial class HtmlChunkParser
                         Border = CellBorder(cellNode, tr, cellFmt.SizePt ?? 11),
                         Padding = CellPadding(cellNode, tr, cellFmt.SizePt ?? 11),
                     };
-                    EmitContainer(cellNode, cellFmt, cell.Blocks, listLevel, inPre: false);
+                    EmitContainer(cellNode, cellFmt, cell.Blocks, ListContext.None, inPre: false);
                     if (cell.Blocks.Count == 0)
                         cell.Blocks.Add(MakeParagraph(cellNode, cellFmt, new List<HtmlFlowRun>()));
                     row.Cells.Add(cell);
@@ -819,7 +844,7 @@ internal static partial class HtmlChunkParser
             return rows;
         }
 
-        void EmitContainer(HtmlNode node, FlowFormat fmt, List<HtmlFlowBlock> blocks, int listLevel, bool inPre)
+        void EmitContainer(HtmlNode node, FlowFormat fmt, List<HtmlFlowBlock> blocks, ListContext ctx, bool inPre)
         {
             var runs = new List<HtmlFlowRun>();
             bool pending = false;
@@ -840,17 +865,9 @@ internal static partial class HtmlChunkParser
                 Flush(node, fmt, runs, blocks, ref pending, inPre, keepEmpty: false);
                 sawBlock = true;
                 if (child.Tag is "ul" or "ol")
-                {
-                    // listLevel is the level of the list that owns this
-                    // container. Only an <li> is already inside a list, so
-                    // only then is a child list one level deeper. A list
-                    // under body/div/td stays at the level it was given
-                    // (0 for a top-level list).
-                    int childLevel = node.Tag == "li" ? listLevel + 1 : listLevel;
-                    ConvertList(child, fmt, blocks, childLevel);
-                }
+                    ConvertList(child, fmt, blocks, ctx);
                 else
-                    EmitElement(child, fmt, blocks, listLevel, inPre);
+                    EmitElement(child, fmt, blocks, ctx, inPre);
             }
             bool emptyElement = !sawBlock && node.Tag is "p" or "h1" or "h2" or "h3" or "h4" or "h5" or "h6" or "pre" or "blockquote";
             Flush(node, fmt, runs, blocks, ref pending, inPre, keepEmpty: emptyElement);
