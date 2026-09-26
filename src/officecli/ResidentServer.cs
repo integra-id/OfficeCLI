@@ -780,6 +780,11 @@ public class ResidentServer : IDisposable
             if (request == null)
                 return MakeResponse(1, "", "Error: Invalid request");
 
+            // Cleared here so a thrown finalize does not leak a failure into
+            // the next command. ExecuteFinalize sets it again when the
+            // pipeline itself reports a non-zero exit.
+            _lastFinalizeExitCode = 0;
+
             // Capture stdout/stderr (safe: _commandLock serializes all commands)
             var stdoutWriter = new StringWriter();
             var stderrWriter = new StringWriter();
@@ -849,6 +854,12 @@ public class ResidentServer : IDisposable
             var isValidate = request.Command.Equals("validate", StringComparison.OrdinalIgnoreCase);
             var validateFailure = isValidate && _lastValidateErrorCount > 0;
             if (isValidate) _lastValidateErrorCount = 0;
+            // finalize prints its own step report (stdout) and returns a
+            // non-zero exit when materialize --strict refuses, TOC rebuild
+            // fails, or validate finds schema errors. The report is not an
+            // exception, so the catch path below would miss it.
+            var finalizeFailure = _lastFinalizeExitCode != 0;
+            _lastFinalizeExitCode = 0;
             // raw-set / add-part applied but introduced validator errors:
             // "applied with caveats" → exit 2, alongside UNSUPPORTED. Read and
             // clear per request so a caveat never leaks into the next command.
@@ -866,7 +877,7 @@ public class ResidentServer : IDisposable
                 // exit code on line below. Without this the resident path
                 // emitted success=true while exit code went to 1 — exactly the
                 // mismatch the non-resident path was already broken for.
-                var businessSuccess = !(batchFailure || validateFailure);
+                var businessSuccess = !(batchFailure || validateFailure || finalizeFailure);
                 // If the sub-command already produced a top-level envelope
                 // (json object with a `success` field — set/add/get/dump all
                 // do this via WrapEnvelope*), forward it unchanged. Rewrapping
@@ -877,7 +888,7 @@ public class ResidentServer : IDisposable
                 string envelope;
                 if (IsAlreadyWrappedEnvelope(stdout))
                 {
-                    envelope = MergeIntoExistingEnvelope(stdout, warnings, batchFailure || validateFailure);
+                    envelope = MergeIntoExistingEnvelope(stdout, warnings, batchFailure || validateFailure || finalizeFailure);
                 }
                 else
                 {
@@ -901,7 +912,7 @@ public class ResidentServer : IDisposable
                 // something was applied when nothing was. Single-command
                 // marker precedence (all-unsupported set → 2) is unchanged.
                 int jsonExitCode = 0;
-                if (batchFailure || validateFailure)
+                if (batchFailure || validateFailure || finalizeFailure)
                     jsonExitCode = 1;
                 else if (rawCaveats || stderr.Contains("UNSUPPORTED") || stderr.Contains(UnrecognizedLatexMarker))
                     jsonExitCode = 2;
@@ -916,7 +927,7 @@ public class ResidentServer : IDisposable
             // errors (rawCaveats — the mutation is applied, see
             // ReportRawMutationOutcome; exit 1 here made callers retry and
             // duplicate content, issue #374).
-            int exitCode = (batchFailure || validateFailure) ? 1
+            int exitCode = (batchFailure || validateFailure || finalizeFailure) ? 1
                 : ((rawCaveats || stderr.Contains("UNSUPPORTED") || stderr.Contains(UnrecognizedLatexMarker)) ? 2
                 : 0);
             return MakeResponse(exitCode, stdout, stderr);
@@ -1158,6 +1169,11 @@ public class ResidentServer : IDisposable
             case "materialize":
                 PromoteToEditable();
                 ExecuteMaterialize(request);
+                NotifyWatchFullRefresh();
+                break;
+            case "finalize":
+                PromoteToEditable();
+                ExecuteFinalize(request);
                 NotifyWatchFullRefresh();
                 break;
             case "raw":
@@ -2447,6 +2463,45 @@ public class ResidentServer : IDisposable
         if (report.Converted > 0)
             word.Save();
         CommandBuilder.WriteMaterializeReport(report, req.Json);
+    }
+
+    // Set by ExecuteFinalize when the pipeline's own exit is non-zero.
+    // ProcessRequest reads and clears it. 0 means the report succeeded.
+    private int _lastFinalizeExitCode;
+
+    private void ExecuteFinalize(ResidentRequest req)
+    {
+        if (_handler is not OfficeCli.Handlers.WordHandler)
+            throw new OfficeCli.Core.CliException("finalize currently only supports .docx/.docm files.")
+            { Code = "unsupported_type" };
+
+        bool On(string key) => !req.GetArg(key, "true").Equals("false", StringComparison.OrdinalIgnoreCase);
+        var options = new OfficeCli.Core.WordFinalize.Options
+        {
+            Materialize = On("materialize"),
+            Toc = On("toc"),
+            PageSetup = On("pageSetup"),
+            Validate = On("validate"),
+            Strict = req.GetArg("strict", "false").Equals("true", StringComparison.OrdinalIgnoreCase),
+        };
+
+        // The pipeline opens the package itself (materialize, refresh --toc,
+        // page setup, validate). Drop the resident lock first so those opens
+        // are not fighting a ZipPackage. Dispose flushes unflushed edits.
+        _handler.Dispose();
+        try
+        {
+            var report = OfficeCli.Core.WordFinalize.Run(_filePath, options);
+            OfficeCli.Core.WordFinalize.Write(report, req.Json);
+            _lastFinalizeExitCode = report.ExitCode;
+        }
+        finally
+        {
+            _handler = OfficeCli.Handlers.DocumentHandlerFactory.Open(_filePath, _editable);
+            if (_handler is OfficeCli.Handlers.WordHandler wh) wh.DeferSave = true;
+            // Disk matches the reopened tree: the pipeline saved its own edits.
+            SetDirty(false);
+        }
     }
 
     private void ExecuteRefresh(ResidentRequest req)

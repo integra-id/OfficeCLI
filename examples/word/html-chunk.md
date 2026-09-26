@@ -132,6 +132,22 @@ The definition is that helper's hybrid multilevel list (`w:multiLevelType` = `hy
 
 See `materialize-altchunk.sh`.
 
+## Post-build (`finalize`)
+
+`officecli finalize file.docx` runs the usual last pass for a technical Word
+document, headless, in this order:
+
+1. **materialize** — HTML, XHTML and plain text, same rules as `materialize` (RTF and MHT stay).
+2. **`refresh --toc`** — only when the file has a TOC field. Entry titles and in-document hyperlinks are rebuilt. PAGEREF page numbers stay the placeholder `0`. No Microsoft Word and no browser. Skipped when there is no TOC field.
+3. **page setup** — `pageSetup=a4-moderate` (alias `tech-doc`) only on sections that have no `w:pgSz`. A section that already has a page size is not modified, including the A4 size `officecli create` writes, so its margins stay. A section with margins but no `w:pgSz` receives the preset's Moderate margins as well.
+4. **validate** — OpenXML schema. Errors are reported and the command exits 1. Earlier steps are kept.
+
+`--no-materialize`, `--no-toc`, `--no-page-setup`, and `--no-validate` skip a step. `--strict` is materialize's `--strict`: the file is left unchanged, later steps do not run, and the command exits 1. `--json` prints one envelope; `data.steps[]` uses `ran`, `skipped`, `failed`, or `not-run`.
+
+Materialize runs before the TOC rebuild, so a heading inside an HTML chunk is collected. This command does not calculate real page numbers.
+
+See `finalize.sh`.
+
 Round-trip: `officecli dump` re-emits body-level HTML/RTF/text chunks as
 `add htmlchunk` items. Chunks inside table cells are reported as a dump warning.
 
