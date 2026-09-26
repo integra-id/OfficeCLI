@@ -58,6 +58,8 @@ internal static class SkillInstaller
         ["data-dashboard"]  = "officecli-data-dashboard",
         ["financial-model"] = "officecli-financial-model",
         ["word-form"]       = "officecli-word-form",
+        ["dokumen-teknis-officecli"] = "dokumen-teknis-officecli",
+        ["rule-gaya-dokumen-teknis"] = "rule-gaya-dokumen-teknis",
     };
 
     // One-line trigger per skill — a compact, always-on discovery lure injected
@@ -79,6 +81,8 @@ internal static class SkillInstaller
         ["academic-paper"]  = "academic papers / research reports",
         ["data-dashboard"]  = "data dashboards",
         ["financial-model"] = "financial models / projections",
+        ["dokumen-teknis-officecli"] = "technical Word docs / dokumen teknis (panduan, spek, runbook, BA)",
+        ["rule-gaya-dokumen-teknis"] = "technical Word style rules / aturan gaya dokumen teknis",
     };
 
     /// <summary>
