@@ -2452,32 +2452,28 @@ public class ResidentServer : IDisposable
     private void ExecuteRefresh(ResidentRequest req)
     {
         if (_handler is not OfficeCli.Handlers.WordHandler)
-        {
-            Console.Error.WriteLine("refresh currently only supports .docx files.");
-            return;
-        }
+            throw new OfficeCli.Core.CliException("refresh currently only supports .docx files.")
+            { Code = "unsupported_type" };
+        var tocOnly = req.GetArg("toc", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
+        // Refresh opens the package itself. Drop the resident handle first so
+        // the write is not fighting an open ZipPackage, then reload whatever
+        // landed on disk.
         _handler.Dispose();
-        bool ok = false;
-        string backend = "";
-        if (OperatingSystem.IsWindows())
+        OfficeCli.Core.WordHtmlRefresh.RefreshResult outcome;
+        try
         {
-            try { ok = OfficeCli.Core.WordPdfBackend.RefreshFields(_filePath); } catch { }
-            if (ok) backend = "word";
+            outcome = OfficeCli.Core.WordHtmlRefresh.Refresh(_filePath, tocOnly);
         }
-        if (!ok)
+        finally
         {
-            try { ok = OfficeCli.Core.WordHtmlRefresh.RefreshViaHtml(_filePath); } catch { }
-            if (ok) backend = "html";
+            _handler = OfficeCli.Handlers.DocumentHandlerFactory.Open(_filePath, _editable);
+            if (_handler is OfficeCli.Handlers.WordHandler wh) wh.DeferSave = true;
         }
-        _handler = OfficeCli.Handlers.DocumentHandlerFactory.Open(_filePath, _editable);
-        if (!ok)
-        {
-            Console.Error.WriteLine("refresh failed (Word backend unavailable and HTML fallback failed).");
-            return;
-        }
-        if (backend == "html")
-            Console.Error.WriteLine("Note: HTML fallback used. TOC page numbers reflect officecli's HTML pagination.");
-        Console.WriteLine($"Refreshed: {_filePath} (backend: {backend})");
+        if (!outcome.Ok)
+            throw new OfficeCli.Core.CliException(outcome.Message)
+            { Code = "refresh_failed" };
+        if (req.Json) Console.WriteLine(OfficeCli.Core.OutputFormatter.WrapEnvelope(outcome.ToJson()));
+        else Console.WriteLine(outcome.Message);
     }
 
     private void ExecuteSwap(ResidentRequest req)

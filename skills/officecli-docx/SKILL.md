@@ -265,13 +265,19 @@ officecli add "$FILE" /styles --type style --prop id=ThesisH1 --prop type=paragr
 officecli add "$FILE" /body --type toc --prop levels="1-3" --prop title="Table of Contents" --prop hyperlinks=true --index 0
 ```
 
-Page numbers need pagination; OfficeCLI cannot calculate TOC page numbers itself. Set `updateFields=true` so Word recomputes the TOC (and all fields) on open. Without a Word-compatible field engine, report the TOC as dynamic and uncomputed; do not claim ready page numbers or guess a static TOC.
+After the headings exist, rebuild the cached TOC body headlessly. This writes one paragraph per heading (style `TOC1`…`TOC9`) with the heading text and, when `hyperlinks=true`, an internal link to a `_Toc` bookmark on that heading. It does not paginate.
+
+```bash
+officecli refresh "$FILE" --toc
+```
+
+PAGEREF page numbers in those entries are the placeholder `0`. `officecli refresh "$FILE"` without `--toc` tries Microsoft Word on Windows, then HTML pagination when a headless browser exists; if neither can number pages, the entries are still rebuilt and the page numbers stay `0`. Do not report those zeros as real page numbers. Set `updateFields=true` when the file should recompute in Word on open.
 
 ```bash
 officecli set "$FILE" /settings --prop updateFields=true
 ```
 
-Address the TOC directly with `/toc[1]` or `/tableofcontents` for `get`/`set`/`remove`.
+A caption passed as `--prop title=` uses the `TOCHeading` style and is not itself an entry. A paragraph styled `Heading1` (including a hand-written "Contents" line) is an entry. Address the field with `/toc[1]` or `/tableofcontents` for `get`/`set`/`remove`.
 
 ### Images
 
@@ -460,7 +466,7 @@ echo "Gate 1 OK"
 # Gate 2 — token leak (shell-escape / template tokens / literal \$ \t \n). grep -c never false-PASSes.
 LEAK=$(officecli view "$FILE" text | grep -cE '(\$[A-Za-z_]+\$|\{\{[^}]+\}\}|<TODO>|xxxx|lorem|\\[\$tn])')
 [ "$LEAK" -eq 0 ] && echo "Gate 2 OK" || { echo "REJECT Gate 2: $LEAK leak line(s)"; officecli view "$FILE" text | grep -nE '(\$[A-Za-z_]+\$|\{\{[^}]+\}\}|<TODO>|xxxx|lorem|\\[\$tn])'; exit 1; }
-# A TOC placeholder is valid before a Word-compatible field engine updates it; confirm the TOC field and updateFields setting structurally instead.
+# Run `officecli refresh "$FILE" --toc` so TOC entries show heading titles. Page number `0` is a placeholder, not a leak.
 
 # Gate 3 — live PAGE field exists when a footer is expected.
 FLD=$(officecli query "$FILE" 'field[fieldType=page]' --json | jq '.data.results | length')
@@ -473,7 +479,7 @@ echo "Delivery Gate PASS"
 Fields carry cached values that may be stale or empty at write time — confirm existence by **structure, not text**.
 
 - **Footer PAGE:** `get /footer[N] --depth 3` lists the begin / instrText / separate / cached / end run chain — ≥ 5 runs for one PAGE, ≥ 11 for composite "Page X of Y". A single run with text `"Page"` = field missing; re-add with `--prop field=page`.
-- **TOC:** `get /toc[1] --depth 2` shows field structure. Page numbers may read `1 1 1 1` or `Update field to see…` until recalculated (see §Table of Contents — set `updateFields=true`).
+- **TOC:** `officecli refresh "$FILE" --toc` fills entry titles and hyperlinks from the current headings. `get /toc[1] --depth 2` shows the field. Page numbers read `0` until Word or a headless HTML pagination pass updates PAGEREF (see §Table of Contents). Do not treat `0` as a real page.
 - **MERGEFIELD:** `query 'field[fieldType=mergefield]'` — one per slot, no literal `{{name}}` elsewhere.
 
 ### Honest limit

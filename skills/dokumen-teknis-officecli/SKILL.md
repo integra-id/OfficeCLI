@@ -158,18 +158,24 @@ officecli add "$FILE" /body --type paragraph --prop text="" --prop pageBreakBefo
 Pakai **field TOC native**, bukan daftar manual / htmlchunk palsu:
 
 ```bash
-officecli add "$FILE" /body --type paragraph --prop text="Daftar Isi" --prop style=Heading1
 officecli add "$FILE" /body --type toc \
+  --prop title="Daftar Isi" \
   --prop levels=1-3 \
   --prop hyperlinks=true \
   --prop pageNumbers=true
 # Cek nama prop persis: officecli help docx toc
+
+# Setelah heading final ada: isi entri (judul + hyperlink) tanpa Word.
+officecli refresh "$FILE" --toc
 ```
 
-Syarat agar hyperlink & nomor halaman benar:
+`title` memakai style TOCHeading dan **tidak** masuk daftar. Jangan memakai Heading1 untuk judul "Daftar Isi" — paragraf itu ikut terkumpul sebagai entri.
 
-- Semua bab/subbab memakai style **Heading1 / Heading2 / Heading3** (bukan bold di Normal).
-- Setelah dibuka di Word, Update Field bila perlu; field tetap hidup di file.
+Syarat agar hyperlink benar:
+
+- Semua bab/subbab memakai style **Heading1 / Heading2 / Heading3** atau `outlineLvl` (bukan bold di Normal).
+- `refresh --toc` menulis judul dan tautan internal (`_Toc`). **Nomor halaman di entri adalah placeholder `0`**, bukan nomor halaman sungguhan.
+- Nomor halaman sungguhan butuh Word (Update Field) atau `officecli refresh` tanpa `--toc` bila ada browser headless. Jangan melaporkan `0` sebagai nomor halaman jadi.
 
 ### Heading native + isi
 
@@ -247,7 +253,7 @@ Ekspor PNG; sisipkan native image atau `<img src="data:image/png;base64,…">` d
 7. QA:
    - `officecli validate "$FILE"`
    - `officecli view "$FILE" outline`
-   - Pastikan TOC field ada (`officecli help` / get toc)
+   - `officecli refresh "$FILE" --toc` lalu cek entri TOC memuat judul heading (nomor halaman boleh `0`)
    - Spot-check satu list (mis. § pengguna): `listStyle`/`numId` ada; teks tanpa prefix `1.`
    - Heading2 spaceBefore ≈ 14pt
    - Buka di Word agar altChunk terkonversi; Update Field pada TOC bila perlu

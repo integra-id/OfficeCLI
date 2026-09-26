@@ -445,7 +445,7 @@
     "recalcFields": {
       "type": "enum",
       "values": ["seq"],
-      "description": "compute and write cached field values officecli CAN evaluate without a layout engine — currently SEQ numbering (Figure/Table 1,2,3… counted in body document order, honouring \\n / \\c / \\r and arabic/roman/alphabetic formats). PAGE/PAGEREF/TOC page numbers need pagination — pair with updateFields=true to defer those to Word. Heading-relative SEQ (\\s) and SEQ outside the body are left for Word. Set on / .",
+      "description": "compute and write cached field values officecli CAN evaluate without a layout engine — currently SEQ numbering (Figure/Table 1,2,3… counted in body document order, honouring \\n / \\c / \\r and arabic/roman/alphabetic formats). PAGE/PAGEREF/TOC page numbers need pagination — pair with updateFields=true to defer those to Word. TOC entry text and hyperlinks (not page numbers) are rebuilt by `officecli refresh <file> --toc`. Heading-relative SEQ (\\s) and SEQ outside the body are left for Word. Set on / .",
       "add": false,
       "set": true,
       "get": false,

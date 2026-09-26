@@ -11,19 +11,27 @@ static partial class CommandBuilder
     private static Command BuildRefreshCommand(Option<bool> jsonOption)
     {
         var fileArg = new Argument<FileInfo>("file") { Description = "Office document path" };
+        var tocOpt = new Option<bool>("--toc")
+        {
+            Description = "Rebuild TOC entries from the current headings (titles and in-document hyperlinks) without Microsoft Word or a browser. PAGEREF page numbers are written as the placeholder 0; previously resolved page numbers are not kept. Omit this flag to try Word on Windows, then HTML pagination when a headless browser exists. If neither can number pages, entries are still rebuilt and page numbers stay 0."
+        };
 
-        var cmd = new Command("refresh", "Recalculate derived field values (TOC page numbers, PAGE/NUMPAGES, cross-references). Word + Windows required for .docx.");
+        var cmd = new Command("refresh",
+            "Recalculate derived fields. --toc rebuilds TOC entries from headings without Word (page numbers stay 0). The default tries Word on Windows, then HTML pagination; if neither can number pages, TOC entries are still rebuilt.");
         cmd.Add(fileArg);
+        cmd.Add(tocOpt);
         cmd.Add(jsonOption);
 
         cmd.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
         {
             var file = result.GetValue(fileArg)!;
+            var tocOnly = result.GetValue(tocOpt);
 
             if (TryResident(file.FullName, req =>
             {
                 req.Command = "refresh";
                 req.Json = json;
+                if (tocOnly) req.Args["toc"] = "true";
             }, json) is { } rc) return rc;
 
             var ext = Path.GetExtension(file.FullName).ToLowerInvariant();
@@ -31,27 +39,13 @@ static partial class CommandBuilder
                 throw new CliException($"refresh currently only supports .docx files (got {ext}).")
                 { Code = "unsupported_type" };
 
-            bool ok = false;
-            string backend = "";
-            if (OperatingSystem.IsWindows())
-            {
-                ok = WordPdfBackend.RefreshFields(file.FullName);
-                if (ok) backend = "word";
-            }
-            if (!ok)
-            {
-                ok = WordHtmlRefresh.RefreshViaHtml(file.FullName);
-                if (ok) backend = "html";
-            }
-            if (!ok)
-                throw new CliException("refresh failed (Word backend unavailable and HTML fallback failed — no headless browser found).")
+            var outcome = WordHtmlRefresh.Refresh(file.FullName, tocOnly);
+            if (!outcome.Ok)
+                throw new CliException(outcome.Message)
                 { Code = "refresh_failed" };
 
-            var msg = $"Refreshed: {file.FullName} (backend: {backend})";
-            if (backend == "html")
-                Console.Error.WriteLine("Note: HTML fallback used. TOC page numbers reflect officecli's HTML pagination, which may differ from Word's layout.");
-            if (json) Console.WriteLine(OutputFormatter.WrapEnvelopeText(msg));
-            else Console.WriteLine(msg);
+            if (json) Console.WriteLine(OutputFormatter.WrapEnvelope(outcome.ToJson()));
+            else Console.WriteLine(outcome.Message);
             return 0;
         }, json); });
 
