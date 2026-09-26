@@ -783,8 +783,9 @@ public partial class WordHandler
         // on replay, surfacing as phantom keys-missing on the second dump.
         // Iterate AddPicture's full property bag and apply anything the run-
         // formatting helper recognises; AddPicture-specific keys (width,
-        // height, alt, name, wrap, anchor, …) are not in the helper's
-        // vocabulary so they pass through untouched.
+        // height, alt, name, src, link, wrap, anchor, …) are not run
+        // formatting. `link` is the picture click target (a:hlinkClick),
+        // already applied above.
         OpenXmlCompositeElement? imgRunRPr = null;
         // ACCOUNTING(handler-as-truth): the foreach below dereferences the
         // dict via IEnumerable.GetEnumerator on the Dictionary static type,
@@ -800,7 +801,7 @@ public partial class WordHandler
         foreach (var (key, value) in properties)
         {
             var lk = key.ToLowerInvariant();
-            if (lk is "width" or "height" or "alt" or "name" or "src"
+            if (lk is "width" or "height" or "alt" or "name" or "src" or "link"
                 or "wrap" or "anchor" or "hposition" or "vposition"
                 or "hrelative" or "vrelative" or "halign" or "valign" or "behindtext"
                 or "tooltip" or "tgtframe" or "tgtframe" or "history" or "url"

@@ -140,4 +140,62 @@ AFCOUNT="$(unzip -l "$MIXED" | grep -c 'afchunk' || true)"
 [[ "$AFCOUNT" -eq 1 ]] || fail "expected exactly one remaining afchunk part, found $AFCOUNT"
 "$OFFICECLI" validate "$MIXED" >/dev/null
 
+echo "== data-URI images become drawings; remote/svg/webp stay alt text =="
+# 1x1 PNG and 1x1 GIF. jpeg/bmp/tiff/emf/wmf use the same picture helper
+# (ImageSource + AddPicture). webp is not in that pipeline.
+PNG='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+GIF='R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+# Newline inside the cell image's base64 — materialize must still embed it.
+PNG_WRAPPED=$(printf '%s\n%s' "${PNG:0:20}" "${PNG:20}")
+IMG="$WORK/images.docx"
+"$OFFICECLI" create "$IMG"
+"$OFFICECLI" add "$IMG" /body --type htmlchunk --prop html="<p>Before <img src=\"data:image/png;base64,$PNG\" width=\"32\" height=\"32\" alt=\"tiny logo\"> mid <img src=\"data:image/gif;base64,$GIF\" width=\"32\" height=\"32\" alt=\"pixel gif\"> after</p><p><img src=\"https://example.com/x.png\" alt=\"remote\"></p><p><img src=\"logo.png\" alt=\"local file\"></p><p><img src=\"data:image/svg+xml;base64,PHN2Zy8+\" alt=\"icon\"></p><p><img src=\"data:image/webp;base64,UklGRg==\" alt=\"wpic\"></p><p>Still here <img src=\"data:image/png;base64,!!!!\" alt=\"broken\"></p><table><tr><td><img src=\"data:image/png;base64,$PNG_WRAPPED\" width=\"16\" height=\"16\" alt=\"cell pic\"></td></tr></table>"
+# A bad data URI is a warning, not a --strict failure. The rest of the chunk
+# (including the good pictures) is still converted.
+"$OFFICECLI" materialize "$IMG" --strict 2>"$WORK/images.err"
+grep -q 'not downloaded' "$WORK/images.err" || fail "expected a warning that remote images are not downloaded"
+grep -q 'not resolved' "$WORK/images.err" || fail "expected a warning that relative images are not resolved"
+grep -q 'unsupported type' "$WORK/images.err" || fail "expected a warning for svg/webp"
+grep -q 'could not be embedded' "$WORK/images.err" || fail "expected a warning for the corrupt data URI"
+python3 - "$IMG" <<'PY' || fail "data-URI pictures were not embedded as drawings"
+import sys, zipfile
+z = zipfile.ZipFile(sys.argv[1])
+xml = z.read("word/document.xml").decode("utf-8")
+names = z.namelist()
+if "w:altChunk" in xml or any("afchunk" in n for n in names):
+    sys.exit("altChunk still present")
+import re
+drawings = xml.count("<w:drawing")
+if drawings < 3:
+    sys.exit(f"expected at least 3 drawings (png, gif, cell), found {drawings}")
+doc_ids = re.findall(r"<wp:docPr[^>]*\sid=\"(\d+)\"", xml)
+if len(doc_ids) < 3 or len(doc_ids) != len(set(doc_ids)):
+    sys.exit(f"docPr ids are missing or not unique: {doc_ids}")
+for needle in ("Before", "mid", "after", "Still here", "tiny logo", "pixel gif", "cell pic"):
+    if needle not in xml:
+        sys.exit(f"missing {needle!r}")
+for placeholder in ("[image: remote]", "[image: local file]", "[image: icon]", "[image: wpic]", "[image: broken]"):
+    if placeholder not in xml:
+        sys.exit(f"missing alt-text placeholder {placeholder!r}")
+# 32px at 96dpi = 304800 EMU; 16px = 152400 EMU.
+if xml.count('cx="304800"') < 2:
+    sys.exit("png/gif extent was not 32px")
+if 'cx="152400"' not in xml:
+    sys.exit("cell picture extent was not 16px")
+# add picture stores bytes at package-root media/ (Target="/media/…"),
+# not only under word/media/. Accept either layout.
+media = [n for n in names if n.startswith("media/") or n.startswith("word/media/")]
+if len(media) < 3:
+    sys.exit(f"expected at least 3 media parts, found {media}")
+blobs = [z.read(n)[:4] for n in media]
+if not any(b.startswith(b"\x89PNG") for b in blobs):
+    sys.exit("no PNG media part")
+if not any(b.startswith(b"GIF8") for b in blobs):
+    sys.exit("no GIF media part")
+rels = z.read("word/_rels/document.xml.rels").decode("utf-8")
+if "relationships/image" not in rels:
+    sys.exit("document rels have no image relationship")
+PY
+"$OFFICECLI" validate "$IMG" >/dev/null
+
 echo "SMOKE OK"

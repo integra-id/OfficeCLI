@@ -47,6 +47,18 @@ internal sealed class HtmlFlowRun
     public double? SizePt { get; set; }
     public string? Font { get; set; }
     public string? Href { get; set; }
+    /// <summary>
+    /// Data URI to embed as an inline picture. Null on a text run.
+    /// Set only for types <c>ImageSource</c> already accepts, except SVG
+    /// (png, jpeg, gif, bmp, tiff, emf, wmf). webp stays text.
+    /// </summary>
+    public string? ImageSrc { get; set; }
+    /// <summary>Picture description from the <c>alt</c> attribute. Empty when absent.</summary>
+    public string? ImageAlt { get; set; }
+    /// <summary>CSS <c>width</c> or the HTML width attribute, in source units.</summary>
+    public string? ImageWidth { get; set; }
+    /// <summary>CSS <c>height</c> or the HTML height attribute, in source units.</summary>
+    public string? ImageHeight { get; set; }
 }
 
 internal sealed class HtmlFlowTable : HtmlFlowBlock
@@ -80,10 +92,12 @@ internal sealed class HtmlChunkParseResult
 ///
 /// Supported: paragraphs, headings, bold/italic/underline/strike, color,
 /// font size and family, sub/sup, links, lists, simple tables (colspan /
-/// rowspan), and a small CSS subset (element, class, id, descendant and
-/// child combinators; the properties listed above plus text-align,
-/// background-color, and margin). Images, scripts, and layout CSS are
-/// reported and dropped.
+/// rowspan), inline pictures from a <c>data:</c> URI (png, jpeg, gif, bmp,
+/// tiff, emf, wmf — the picture pipeline's raster types, not svg or webp),
+/// and a small CSS subset (element, class, id, descendant and child
+/// combinators; the properties listed above plus text-align,
+/// background-color, and margin). Remote and relative images, svg, webp,
+/// scripts, and layout CSS are reported and not embedded.
 /// </summary>
 internal static class HtmlChunkParser
 {
@@ -124,8 +138,14 @@ internal static class HtmlChunkParser
         var body = Enumerate(root, n => n.Tag == "body").FirstOrDefault();
         var start = body ?? root;
         conv.EmitElement(start, FlowFormat.Empty, result.Blocks, listLevel: 0, inPre: false);
-        if (conv.Images > 0)
-            result.Warnings.Add($"{conv.Images} image(s) kept as alt text; image bytes are not embedded");
+        if (conv.ImagesRemote > 0)
+            result.Warnings.Add($"{conv.ImagesRemote} image(s) kept as alt text (http(s) URL is not downloaded)");
+        if (conv.ImagesLocal > 0)
+            result.Warnings.Add($"{conv.ImagesLocal} image(s) kept as alt text (relative or local URL is not resolved)");
+        if (conv.ImagesUnsupported > 0)
+            result.Warnings.Add($"{conv.ImagesUnsupported} image(s) kept as alt text (unsupported type such as svg or webp, or no src)");
+        if (conv.ImagesInvalid > 0)
+            result.Warnings.Add($"{conv.ImagesInvalid} image(s) kept as alt text (data URI could not be read)");
         if (conv.Objects > 0)
             result.Warnings.Add($"{conv.Objects} embedded object(s) dropped (svg, video, iframe, object)");
         if (conv.Scripts > 0)
@@ -607,7 +627,7 @@ internal static class HtmlChunkParser
     sealed class Converter
     {
         readonly Stylesheet _sheet;
-        public int Images, Objects, Scripts;
+        public int ImagesRemote, ImagesLocal, ImagesUnsupported, ImagesInvalid, Objects, Scripts;
 
         public Converter(Stylesheet sheet)
         {
@@ -824,9 +844,32 @@ internal static class HtmlChunkParser
             if (tag == "wbr") return;
             if (tag == "img")
             {
-                Images++;
-                var alt = node.Attrs.TryGetValue("alt", out var a) && a.Length > 0 ? a : "image";
-                runs.Add(RunFrom(fmt with { Italic = true }, "[image: " + SanitizeXml(alt) + "]"));
+                var alt = node.Attrs.TryGetValue("alt", out var a) ? a : "";
+                var label = alt.Length > 0 ? alt : "image";
+                node.Attrs.TryGetValue("src", out var src);
+                var kind = ClassifyImageSrc(src ?? "", out var normalized);
+                if (kind == ImageSrcKind.Embed)
+                {
+                    runs.Add(new HtmlFlowRun
+                    {
+                        ImageSrc = normalized,
+                        ImageAlt = SanitizeXml(alt),
+                        ImageWidth = ImageDimension(node, "width"),
+                        ImageHeight = ImageDimension(node, "height"),
+                        Href = string.IsNullOrWhiteSpace(fmt.Href) ? null : fmt.Href,
+                    });
+                }
+                else
+                {
+                    switch (kind)
+                    {
+                        case ImageSrcKind.Remote: ImagesRemote++; break;
+                        case ImageSrcKind.Local: ImagesLocal++; break;
+                        case ImageSrcKind.Invalid: ImagesInvalid++; break;
+                        default: ImagesUnsupported++; break;
+                    }
+                    runs.Add(RunFrom(fmt with { Italic = true }, "[image: " + SanitizeXml(label) + "]"));
+                }
                 pending = false;
                 return;
             }
@@ -948,6 +991,14 @@ internal static class HtmlChunkParser
             return fmt;
         }
 
+        string? ImageDimension(HtmlNode node, string name)
+        {
+            // CSS wins over the presentational attribute, same as a browser.
+            if (Own(node, name) is string css && css.Length > 0) return css;
+            if (node.Attrs.TryGetValue(name, out var raw) && raw.Length > 0) return raw;
+            return null;
+        }
+
         string? Own(HtmlNode node, string prop)
         {
             if (node.Declarations.TryGetValue(prop, out var inline)) return inline;
@@ -1055,24 +1106,26 @@ internal static class HtmlChunkParser
         return true;
     }
 
-    static bool HasContent(List<HtmlFlowRun> runs)
-    {
-        foreach (var r in runs)
-            if (r.Text.Length > 0) return true;
-        return false;
-    }
-
-    static void TrimTrailingSpace(List<HtmlFlowRun> runs)
-    {
-        for (int i = runs.Count - 1; i >= 0; i--)
+        static bool HasContent(List<HtmlFlowRun> runs)
         {
-            if (runs[i].Break) return;
-            if (runs[i].Text.Length == 0) { runs.RemoveAt(i); continue; }
-            runs[i].Text = runs[i].Text.TrimEnd(' ');
-            if (runs[i].Text.Length == 0) runs.RemoveAt(i);
-            return;
+            foreach (var r in runs)
+                if (r.ImageSrc != null || r.Text.Length > 0) return true;
+            return false;
         }
-    }
+
+        static void TrimTrailingSpace(List<HtmlFlowRun> runs)
+        {
+            for (int i = runs.Count - 1; i >= 0; i--)
+            {
+                // A picture run has no text. It is still content, and it must
+                // not be dropped the way a collapsed whitespace run is.
+                if (runs[i].ImageSrc != null || runs[i].Break) return;
+                if (runs[i].Text.Length == 0) { runs.RemoveAt(i); continue; }
+                runs[i].Text = runs[i].Text.TrimEnd(' ');
+                if (runs[i].Text.Length == 0) runs.RemoveAt(i);
+                return;
+            }
+        }
 
     static bool IsBold(string weight)
     {
@@ -1258,6 +1311,76 @@ internal static class HtmlChunkParser
         ["maroon"] = "800000", ["teal"] = "008080", ["aqua"] = "00FFFF", ["fuchsia"] = "FF00FF",
         ["lime"] = "00FF00", ["olive"] = "808000",
     };
+
+    enum ImageSrcKind { Embed, Remote, Local, Unsupported, Invalid }
+
+    /// <summary>
+    /// Decide whether an <c>img</c> src can be handed to the existing picture
+    /// pipeline. Only a base64 <c>data:</c> URI of a type
+    /// <c>ImageSource</c> already embeds is <see cref="ImageSrcKind.Embed"/>.
+    /// SVG is refused here even though the picture pipeline can wrap it.
+    /// http(s) and every other URL are not fetched and not read from disk.
+    /// </summary>
+    static ImageSrcKind ClassifyImageSrc(string src, out string normalized)
+    {
+        normalized = src.Trim();
+        if (normalized.Length == 0) return ImageSrcKind.Unsupported;
+        if (normalized.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = NormalizeDataUri(normalized);
+            return ClassifyDataUri(normalized);
+        }
+        if (normalized.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            || normalized.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+            || normalized.StartsWith("//", StringComparison.Ordinal))
+            return ImageSrcKind.Remote;
+        return ImageSrcKind.Local;
+    }
+
+    static ImageSrcKind ClassifyDataUri(string src)
+    {
+        int comma = src.IndexOf(',');
+        if (comma < 5) return ImageSrcKind.Invalid;
+        var header = src[..comma];
+        if (header.IndexOf("base64", StringComparison.OrdinalIgnoreCase) < 0)
+            return ImageSrcKind.Invalid;
+        int mimeStart = header.IndexOf(':') + 1;
+        int mimeEnd = header.IndexOf(';');
+        if (mimeEnd < mimeStart) mimeEnd = header.Length;
+        var mime = header[mimeStart..mimeEnd].Trim().ToLowerInvariant();
+        // Keep this list aligned with ImageSource.MimeToContentType, minus SVG.
+        if (mime is "image/png"
+            or "image/jpeg" or "image/jpg"
+            or "image/gif"
+            or "image/bmp"
+            or "image/tiff" or "image/tif"
+            or "image/emf" or "image/x-emf"
+            or "image/wmf" or "image/x-wmf")
+            return ImageSrcKind.Embed;
+        return ImageSrcKind.Unsupported;
+    }
+
+    /// <summary>
+    /// Drop whitespace inside the base64 payload. HTML pretty-printers wrap
+    /// long data URIs; <c>Convert.FromBase64String</c> rejects that whitespace.
+    /// </summary>
+    static string NormalizeDataUri(string src)
+    {
+        int comma = src.IndexOf(',');
+        if (comma < 0) return src;
+        var payload = src[(comma + 1)..];
+        bool dirty = false;
+        foreach (var c in payload)
+        {
+            if (c is ' ' or '\t' or '\n' or '\r') { dirty = true; break; }
+        }
+        if (!dirty) return src;
+        var sb = new StringBuilder(src.Length);
+        sb.Append(src[..(comma + 1)]);
+        foreach (var c in payload)
+            if (c is not (' ' or '\t' or '\n' or '\r')) sb.Append(c);
+        return sb.ToString();
+    }
 
     internal static string SanitizeXml(string text)
     {

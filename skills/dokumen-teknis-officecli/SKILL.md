@@ -234,7 +234,7 @@ officecli add "$FILE" / --type footer --prop type=first --prop text=""
 
 ### Diagram
 
-Ekspor PNG; sisipkan native image atau `<img src="data:image/png;base64,…">` di htmlchunk. Selalu isi `alt`.
+Ekspor PNG; sisipkan native image atau `<img src="data:image/png;base64,…">` di htmlchunk. Selalu isi `alt`. `officecli materialize` menyematkan data-URI png/jpeg/gif/bmp/tiff/emf/wmf sebagai `w:drawing` (alt jadi deskripsi gambar). webp, svg, serta URL http(s) atau path relatif tetap teks alt dan tidak menggagalkan konversi.
 
 ## Alur kerja agen (checklist)
 
