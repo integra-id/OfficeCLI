@@ -175,13 +175,60 @@ internal static class SkillInstaller
         if (content == null || !content.StartsWith("---")) return "";
         var endIdx = content.IndexOf("---", 3);
         if (endIdx < 0) return "";
-        foreach (var line in content[3..endIdx].Split('\n'))
+        var lines = content[3..endIdx].Split('\n');
+        for (var i = 0; i < lines.Length; i++)
         {
-            var trimmed = line.Trim();
-            if (trimmed.StartsWith("description:", StringComparison.OrdinalIgnoreCase))
-                return trimmed["description:".Length..].Trim().Trim('"');
+            var trimmed = lines[i].Trim();
+            if (!trimmed.StartsWith("description:", StringComparison.OrdinalIgnoreCase))
+                continue;
+            var value = trimmed["description:".Length..].Trim();
+            // Folded / literal YAML block (`description: >-`). A same-line
+            // indicator is not the description; the text is the indented
+            // block that follows. Single-line values stay as they are.
+            if (value is ">" or ">-" or ">+" or "|" or "|-" or "|+")
+                return ReadDescriptionBlock(lines, i + 1, folded: value[0] == '>');
+            return value.Trim('"');
         }
         return "";
+    }
+
+    /// <summary>
+    /// Indented lines of a YAML block scalar, folded (<c>&gt;</c>) into one
+    /// paragraph or kept literal (<c>|</c>). Stops at the next unindented key.
+    /// </summary>
+    private static string ReadDescriptionBlock(string[] lines, int start, bool folded)
+    {
+        var parts = new List<string>();
+        for (var j = start; j < lines.Length; j++)
+        {
+            var raw = lines[j].TrimEnd('\r');
+            if (raw.Length == 0)
+            {
+                parts.Add("");
+                continue;
+            }
+            if (!char.IsWhiteSpace(raw[0]))
+                break;
+            parts.Add(raw.Trim());
+        }
+
+        if (!folded)
+            return string.Join("\n", parts).Trim();
+
+        var sb = new StringBuilder();
+        foreach (var part in parts)
+        {
+            if (part.Length == 0)
+            {
+                if (sb.Length > 0 && !sb.ToString().EndsWith("\n\n", StringComparison.Ordinal))
+                    sb.Append("\n\n");
+                continue;
+            }
+            if (sb.Length > 0 && sb[^1] != '\n')
+                sb.Append(' ');
+            sb.Append(part);
+        }
+        return sb.ToString().Trim();
     }
 
     /// <summary>
