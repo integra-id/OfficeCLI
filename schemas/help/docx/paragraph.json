@@ -222,6 +222,23 @@
       "readback": "n/a (write-only via paragraph; query numbering part)",
       "enforcement": "report"
     },
+    "mono": {
+      "type": "bool",
+      "description": "GitHub-style monospace keyword chip on the paragraph's runs (alias: chip, monoChip): Consolas 9.5pt, shading #F6F8FA, character border 1px solid #D0D7DE. On Add, applied to the implicit run created by text. On Set, applied to every run in the paragraph — not to paragraph shading. To chip one keyword inside a sentence, set a run path or pass range=START:END. false clears chip pieces that still match. Get reads font, size, fill, and bdr.",
+      "aliases": [
+        "chip",
+        "monoChip",
+        "monochip"
+      ],
+      "add": true,
+      "set": true,
+      "get": false,
+      "examples": [
+        "--prop text=\"NFR-01\" --prop mono=true",
+        "--prop range=4:26 --prop mono=true"
+      ],
+      "enforcement": "report"
+    },
     "bold": {
       "type": "bool",
       "description": "run-level bold. On Add, applied to the implicit run created by 'text'. On Set, applied to all runs in the paragraph and to the paragraph-mark run properties so subsequent runs inherit.",

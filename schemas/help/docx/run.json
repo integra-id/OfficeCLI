@@ -814,6 +814,24 @@
       ],
       "enforcement": "report"
     },
+    "mono": {
+      "type": "bool",
+      "description": "GitHub-style monospace keyword chip on this run (alias: chip, monoChip). true writes Consolas 9.5pt, run shading #F6F8FA (w:shd), and a character border 1px solid #D0D7DE (w:bdr single, sz=6 eighths of a point, space=1pt). false removes only those pieces when they still match the chip. Applies to the run, a character range (range=START:END), or — when set on a paragraph or table cell — each run inside it. Never paints paragraph or cell shading. Htmlchunk code / span.mono still materializes the font, size, and shading; it does not emit the character border. Get reads the pieces back as font, size, fill, and bdr, not as mono.",
+      "aliases": [
+        "chip",
+        "monoChip",
+        "monochip"
+      ],
+      "add": true,
+      "set": true,
+      "get": false,
+      "examples": [
+        "--prop mono=true",
+        "--prop text=\"docs/testing/README.md\" --prop chip=true",
+        "--prop range=4:26 --prop mono=true"
+      ],
+      "enforcement": "report"
+    },
     "bdr": {
       "type": "string",
       "description": "Run border: style;size;color, same grammar as paragraph pbdr (w:bdr).",

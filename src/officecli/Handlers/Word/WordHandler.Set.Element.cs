@@ -925,7 +925,7 @@ public partial class WordHandler
                         var detail = isAlignmentKey
                             ? $"{key} (alignment is a paragraph/ptab property, not a run prop)"
                             : (unsupported.Count == 0
-                                ? $"{key} (valid run props: text, bold, italic, font, size, color, underline, strike, highlight, caps, smallcaps, superscript, subscript, shading, link, formula)"
+                                ? $"{key} (valid run props: text, bold, italic, font, size, color, underline, strike, highlight, caps, smallcaps, superscript, subscript, shading, mono, link, formula)"
                                 : key);
                         unsupported.Add(detail);
                     }
@@ -1471,7 +1471,10 @@ public partial class WordHandler
                   // handled by ApplyParagraphLevelProperty / the direction cascade.)
                   or "caps" or "smallcaps" or "vanish" or "dstrike"
                   or "outline" or "shadow" or "emboss" or "imprint"
-                  or "noproof" or "superscript" or "subscript":
+                  or "noproof" or "superscript" or "subscript"
+                  // mono/chip/monoChip is run shading + character border, not
+                  // paragraph or cell fill. Keep it on this run-key branch.
+                  or "mono" or "monochip" or "chip":
                     // Apply run-level formatting to all runs in the paragraph.
                     var allParaRuns = para.Descendants<Run>().ToList();
                     // Paragraph-mark run properties (<w:rPr> inside <w:pPr>)
@@ -1968,6 +1971,9 @@ public partial class WordHandler
                 case "underlinecolor":
                 case "underlineColor":
                 case "strike":
+                case "mono":
+                case "monochip":
+                case "chip":
                     // Apply to all runs in all paragraphs in the cell
                     // CONSISTENCY(run-prop-helper): per-prop OOXML write
                     // logic lives in ApplyRunFormatting; this branch
@@ -2483,7 +2489,7 @@ public partial class WordHandler
                         break;
                     if (!GenericXmlQuery.TryCreateTypedChild(tcPr, key, value))
                         unsupported.Add(unsupported.Count == 0
-                            ? $"{key} (valid cell props: text, font, size, bold, italic, color, alignment, valign, width, shd, border, colspan, fitText, textDirection, nowrap, padding)"
+                            ? $"{key} (valid cell props: text, font, size, bold, italic, color, mono, alignment, valign, width, shd, border, colspan, fitText, textDirection, nowrap, padding)"
                             : key);
                     break;
             }

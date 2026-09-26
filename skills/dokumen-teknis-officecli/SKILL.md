@@ -295,7 +295,20 @@ Chip abu + border hanya pada **keyword/teks monospace** (bukan seluruh sel tabel
 
 HTML: bungkus keyword dengan `<code>…</code>` atau `<span class="mono">…</span>` — termasuk di dalam `<td>`. Contoh: `<td><span class="mono">docs/testing/README.md</span></td>`.
 
-**Dilarang** `class="mono"` / fill abu pada `<td>` / `<th>` (itu mewarnai seluruh cell).
+**Path native (tanpa htmlchunk).** Prop `mono=true` (alias `chip`, `monoChip`) menstempel chip yang sama pada run OOXML: Consolas 9.5pt, shading `#F6F8FA`, border karakter `w:bdr` `single` / `sz=6` (1px) / `#D0D7DE` / `space=1pt`. Berlaku pada run, `range=START:END`, atau setiap run di dalam paragraf/sel. Bukan shading paragraf dan bukan `w:shd` sel.
+
+```bash
+officecli add doc.docx "/body/p[1]" --type run \
+  --prop text="docs/testing/README.md" --prop mono=true
+officecli set doc.docx "/body/p[1]" --prop range=4:26 --prop mono=true
+officecli set doc.docx "/body/tbl[1]/tr[2]/tc[1]/p[1]/r[1]" --prop mono=true
+```
+
+`mono=false` melepas border dan shading chip; font Consolas 9.5pt ikut dilepas hanya jika nilainya masih token chip. `officecli help docx run` (juga `paragraph`, `table-cell`).
+
+Materialize htmlchunk menulis font, ukuran, dan shading untuk `code` / `span.mono`, tetapi **tidak** menulis border run (border CSS pada elemen inline diabaikan). Prop `mono` menambah border karakter itu.
+
+**Dilarang** `class="mono"` / fill abu pada `<td>` / `<th>` (itu mewarnai seluruh cell). Dilarang `set` sel `--prop shading=` / `--prop fill=` untuk meniru chip.
 
 Blok kode penuh (`pre.block`) tetap full-width abu + border — terpisah dari chip keyword.
 
@@ -369,7 +382,7 @@ Htmlchunk tetap memakai `th.col-id` / `td.col-id` dan `white-space: nowrap`. `of
 13. **Tanpa placeholder final** — `$xxx$`, `TODO`, `lorem` dilarang di output.
 14. **Field halaman hidup** di footer.
 15. **Reusable** — ganti konten + logo + DOC-ID, bukan gaya.
-16. **Mono keyword = chip** — hanya teks keyword (`code`/`span.mono`) yang ber-chip; jangan warnai seluruh sel tabel; full `pre.block` terpisah.
+16. **Mono keyword = chip** — hanya teks keyword (`code`/`span.mono`, atau prop native `mono=true` pada run/`range`) yang ber-chip; jangan warnai seluruh sel tabel; full `pre.block` terpisah.
 17. **Body justify** — paragraf Normal rata kiri-kanan; heading/cover tidak ikut force-justify.
 18. **Kolom ID = nowrap + fit max** — `T-01`/`NFR-01`/`FR-001` dll. satu baris; lebar kolom dari ID terpanjang; dilarang wrap. Tabel native: `set …/col[N] --prop idColumn=true`.
 
@@ -384,6 +397,7 @@ Htmlchunk tetap memakai `th.col-id` / `td.col-id` dan `white-space: nowrap`. `of
 ## Referensi cepat OfficeCLI
 
 ```bash
+officecli help docx run          # mono=true — chip Consolas pada run (bukan htmlchunk)
 officecli help docx htmlchunk
 officecli help docx toc
 officecli help docx section      # pageSetup=a4-moderate, margins=moderate, pageSize=a4
