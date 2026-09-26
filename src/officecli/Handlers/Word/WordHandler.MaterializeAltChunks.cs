@@ -1,12 +1,15 @@
 // Copyright 2026 OfficeCLI (https://OfficeCLI.AI)
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Globalization;
 using System.Text;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using OfficeCli.Core;
 using OfficeCli.Core.Html;
+using DW = DocumentFormat.OpenXml.Drawing.Wordprocessing;
+using PIC = DocumentFormat.OpenXml.Drawing.Pictures;
 
 namespace OfficeCli.Handlers;
 
@@ -84,8 +87,14 @@ public partial class WordHandler
     /// call so the file is left untouched).
     ///
     /// This is a subset of what Word's HTML importer does on open+save.
-    /// Images are not embedded, scripts are dropped, and most layout CSS
-    /// (float, flex, borders, media queries) is ignored. Source formatting
+    /// A <c>data:</c> image (png, jpeg, gif, bmp, tiff, emf, wmf) is embedded
+    /// with <see cref="AddPicture"/> as an inline <c>w:drawing</c>; the alt
+    /// attribute is the picture description. webp and svg are not embedded.
+    /// http(s) and relative URLs are not downloaded or read from disk — they
+    /// stay as alt text, and a data URI that fails to decode does the same.
+    /// Those picture warnings do not trip <paramref name="strict"/> and do
+    /// not stop the rest of the chunk. Scripts are dropped, and most layout
+    /// CSS (float, flex, borders, media queries) is ignored. Source formatting
     /// is written as direct formatting — the same idea as
     /// <c>w:altChunkPr/w:matchSrc</c> — rather than mapped onto the
     /// destination styles. Heading elements also reference Heading1–Heading6
@@ -193,6 +202,7 @@ public partial class WordHandler
         int converted = 0;
         int droppedLinks = 0;
         var linkRels = new Dictionary<string, string>(StringComparer.Ordinal);
+        var pictureIds = SeedPictureIds();
 
         foreach (var job in jobs)
         {
@@ -204,7 +214,7 @@ public partial class WordHandler
 
             foreach (var block in job.Parsed.Blocks)
             {
-                var el = CreateFlowBlock(block, main, linkRels, ref droppedLinks);
+                var el = CreateFlowBlock(block, main, linkRels, ref droppedLinks, pictureIds, warnings);
                 parent.InsertBefore(el, chunk);
                 if (el is Paragraph para && block is HtmlFlowParagraph flow && flow.ListKind != null)
                     ApplyListStyle(para, flow.ListKind == "bullet" ? "bullet" : "ordered", flow.ListStart, flow.ListLevel);
@@ -270,17 +280,17 @@ public partial class WordHandler
         try { main.DeletePart(partId); } catch { /* already gone */ }
     }
 
-    OpenXmlElement CreateFlowBlock(HtmlFlowBlock block, MainDocumentPart main, Dictionary<string, string> linkRels, ref int droppedLinks)
+    OpenXmlElement CreateFlowBlock(HtmlFlowBlock block, MainDocumentPart main, Dictionary<string, string> linkRels, ref int droppedLinks, PictureIds pictureIds, List<string> warnings)
     {
         return block switch
         {
-            HtmlFlowTable table => CreateTable(table, main, linkRels, ref droppedLinks),
-            HtmlFlowParagraph para => CreateParagraph(para, main, linkRels, ref droppedLinks),
+            HtmlFlowTable table => CreateTable(table, main, linkRels, ref droppedLinks, pictureIds, warnings),
+            HtmlFlowParagraph para => CreateParagraph(para, main, linkRels, ref droppedLinks, pictureIds, warnings),
             _ => new Paragraph(),
         };
     }
 
-    Paragraph CreateParagraph(HtmlFlowParagraph flow, MainDocumentPart main, Dictionary<string, string> linkRels, ref int droppedLinks)
+    Paragraph CreateParagraph(HtmlFlowParagraph flow, MainDocumentPart main, Dictionary<string, string> linkRels, ref int droppedLinks, PictureIds pictureIds, List<string> warnings)
     {
         var para = new Paragraph();
         AssignParaId(para);
@@ -329,11 +339,31 @@ public partial class WordHandler
                 }
             };
         }
+        // AddPicture sets this on a picture-only paragraph so a fixed Normal
+        // line height does not clip the drawing. Do it here too when the
+        // picture shares the paragraph with text.
+        if (flow.Runs.Any(r => r.ImageSrc != null))
+        {
+            var spacing = pPr.SpacingBetweenLines ?? new SpacingBetweenLines();
+            if (spacing.LineRule == null)
+            {
+                spacing.Line = "240";
+                spacing.LineRule = LineSpacingRuleValues.Auto;
+            }
+            pPr.SpacingBetweenLines = spacing;
+        }
         if (pPr.HasChildren) para.AppendChild(pPr);
 
         var runs = flow.Runs;
         for (int i = 0; i < runs.Count;)
         {
+            if (runs[i].ImageSrc != null)
+            {
+                if (!TryAppendHtmlPicture(para, runs[i], pictureIds, warnings))
+                    AppendImageFallback(para, runs[i]);
+                i++;
+                continue;
+            }
             var href = runs[i].Href;
             if (string.IsNullOrWhiteSpace(href))
             {
@@ -342,7 +372,9 @@ public partial class WordHandler
                 continue;
             }
             int j = i;
-            while (j < runs.Count && runs[j].Href == href) j++;
+            // An inline picture is its own run (AddPicture). Don't swallow it
+            // into the surrounding hyperlink's text runs.
+            while (j < runs.Count && runs[j].ImageSrc == null && runs[j].Href == href) j++;
             if (TryCreateHyperlink(main, href, linkRels, out var hyperlink))
             {
                 for (int k = i; k < j; k++) AppendRun(hyperlink, runs[k]);
@@ -446,7 +478,7 @@ public partial class WordHandler
         }
     }
 
-    Table CreateTable(HtmlFlowTable flow, MainDocumentPart main, Dictionary<string, string> linkRels, ref int droppedLinks)
+    Table CreateTable(HtmlFlowTable flow, MainDocumentPart main, Dictionary<string, string> linkRels, ref int droppedLinks, PictureIds pictureIds, List<string> warnings)
     {
         var slots = new Dictionary<(int R, int C), CellSlot>();
         int cols = 0;
@@ -507,7 +539,7 @@ public partial class WordHandler
                 }
                 if (slot.OriginCol != c) continue;
                 tr.AppendChild(slot.IsOrigin
-                    ? FilledCell(slot, colW, main, linkRels, ref droppedLinks)
+                    ? FilledCell(slot, colW, main, linkRels, ref droppedLinks, pictureIds, warnings)
                     : ContinueCell(slot, colW));
             }
             if (!tr.Elements<TableCell>().Any())
@@ -519,14 +551,14 @@ public partial class WordHandler
 
     sealed record CellSlot(HtmlFlowCell Cell, bool IsOrigin, int OriginCol, int ColSpan);
 
-    TableCell FilledCell(CellSlot slot, int colW, MainDocumentPart main, Dictionary<string, string> linkRels, ref int droppedLinks)
+    TableCell FilledCell(CellSlot slot, int colW, MainDocumentPart main, Dictionary<string, string> linkRels, ref int droppedLinks, PictureIds pictureIds, List<string> warnings)
     {
         var tc = new TableCell();
         tc.AppendChild(CellProperties(slot.Cell.ColSpan, colW, slot.Cell.Fill,
             slot.Cell.RowSpan > 1 ? MergedCellValues.Restart : null));
         foreach (var block in slot.Cell.Blocks)
         {
-            var el = CreateFlowBlock(block, main, linkRels, ref droppedLinks);
+            var el = CreateFlowBlock(block, main, linkRels, ref droppedLinks, pictureIds, warnings);
             tc.AppendChild(el);
             if (el is Paragraph para && block is HtmlFlowParagraph flow && flow.ListKind != null)
                 ApplyListStyle(para, flow.ListKind == "bullet" ? "bullet" : "ordered", flow.ListStart, flow.ListLevel);
@@ -570,5 +602,162 @@ public partial class WordHandler
         if (!string.IsNullOrEmpty(fill))
             tcPr.Shading = new Shading { Val = ShadingPatternValues.Clear, Fill = fill };
         return tcPr;
+    }
+
+    /// <summary>wp:docPr ids already used in the package, plus the next free id.</summary>
+    sealed class PictureIds
+    {
+        public HashSet<uint> Used { get; } = new();
+        public uint Next { get; set; } = 1;
+    }
+
+    PictureIds SeedPictureIds()
+    {
+        var ids = new PictureIds();
+        var main = _doc.MainDocumentPart;
+        uint max = 0;
+        if (main != null)
+        {
+            foreach (var root in EnumerateContentRoots(main))
+            {
+                foreach (var dp in root.Descendants<DW.DocProperties>())
+                {
+                    if (dp.Id?.HasValue != true) continue;
+                    ids.Used.Add(dp.Id.Value);
+                    if (dp.Id.Value > max) max = dp.Id.Value;
+                }
+            }
+        }
+        ids.Next = max == uint.MaxValue ? 1 : max + 1;
+        return ids;
+    }
+
+    /// <summary>
+    /// Embed one HTML image by calling <see cref="AddPicture"/> — the same
+    /// helper <c>add picture</c> uses — so data URIs, content types, and
+    /// alt/description land on a normal inline drawing. The paragraph may
+    /// not be in the package yet (a table cell is built before it is
+    /// inserted), so docPr ids are uniqued here: <see cref="AddPicture"/>
+    /// only sees drawings already in the package.
+    /// </summary>
+    bool TryAppendHtmlPicture(Paragraph para, HtmlFlowRun flow, PictureIds pictureIds, List<string> warnings)
+    {
+        if (string.IsNullOrEmpty(flow.ImageSrc)) return false;
+        var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["src"] = flow.ImageSrc,
+        };
+        if (!string.IsNullOrEmpty(flow.ImageAlt))
+            props["alt"] = flow.ImageAlt;
+        var width = PictureLength(flow.ImageWidth);
+        var height = PictureLength(flow.ImageHeight);
+        if (width != null) props["width"] = width;
+        if (height != null) props["height"] = height;
+        // Click target. AddPicture stores it as a:hlinkClick and drops an
+        // unsafe scheme without failing the picture.
+        if (!string.IsNullOrWhiteSpace(flow.Href))
+            props["link"] = flow.Href.Trim();
+
+        var before = new HashSet<Run>(para.Descendants<Run>());
+        try
+        {
+            AddPicture(para, "/body", null, props);
+        }
+        catch (Exception ex)
+        {
+            var rescued = NewPictureRun(para, before);
+            if (rescued != null)
+            {
+                ClaimPictureRun(rescued, pictureIds);
+                warnings.Add("image embedded; a picture property was dropped (" + Brief(ex) + ")");
+                return true;
+            }
+            warnings.Add("image kept as alt text (data URI could not be embedded: " + Brief(ex) + ")");
+            return false;
+        }
+
+        var run = NewPictureRun(para, before);
+        if (run == null)
+        {
+            warnings.Add("image kept as alt text (picture helper did not insert a drawing)");
+            return false;
+        }
+        ClaimPictureRun(run, pictureIds);
+        return true;
+    }
+
+    static Run? NewPictureRun(Paragraph para, HashSet<Run> before)
+    {
+        foreach (var run in para.Descendants<Run>())
+        {
+            if (before.Contains(run)) continue;
+            if (run.Descendants<Drawing>().Any()) return run;
+        }
+        return null;
+    }
+
+    static void ClaimPictureRun(Run run, PictureIds ids)
+    {
+        var dp = run.Descendants<DW.DocProperties>().FirstOrDefault();
+        if (dp == null) return;
+        var nv = run.Descendants<PIC.NonVisualDrawingProperties>().FirstOrDefault();
+        uint id = dp.Id?.Value ?? 0;
+        if (id == 0 || ids.Used.Contains(id))
+        {
+            while (ids.Next == 0 || ids.Used.Contains(ids.Next))
+            {
+                if (ids.Next == uint.MaxValue) { ids.Next = 1; break; }
+                ids.Next++;
+            }
+            id = ids.Next;
+            if (ids.Next != uint.MaxValue) ids.Next++;
+            dp.Id = id;
+            if (nv != null) nv.Id = id;
+        }
+        ids.Used.Add(id);
+    }
+
+    static void AppendImageFallback(Paragraph para, HtmlFlowRun flow)
+    {
+        var label = string.IsNullOrEmpty(flow.ImageAlt) ? "image" : flow.ImageAlt;
+        AppendRun(para, new HtmlFlowRun { Italic = true, Text = "[image: " + label + "]" });
+    }
+
+    /// <summary>
+    /// HTML width/height for <see cref="AddPicture"/>. A bare number is CSS
+    /// pixels (the HTML attribute rule), not raw EMU. Percentages and
+    /// font-relative units are dropped so the picture helper can use the
+    /// image's own aspect ratio instead of failing the embed.
+    /// </summary>
+    static string? PictureLength(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        raw = raw.Trim();
+        if (raw.EndsWith('%')) return null;
+        if (raw.Equals("auto", StringComparison.OrdinalIgnoreCase)
+            || raw.Equals("inherit", StringComparison.OrdinalIgnoreCase)
+            || raw.Equals("initial", StringComparison.OrdinalIgnoreCase)
+            || raw.Equals("unset", StringComparison.OrdinalIgnoreCase))
+            return null;
+        var token = double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out _)
+            ? raw + "px"
+            : raw;
+        try
+        {
+            if (EmuConverter.ParseEmu(token) <= 0) return null;
+            return token;
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    static string Brief(Exception ex)
+    {
+        var message = ex.Message.Replace('\r', ' ').Replace('\n', ' ').Trim();
+        if (message.Length == 0) message = ex.GetType().Name;
+        if (message.Length > 160) message = message[..160] + "…";
+        return message;
     }
 }

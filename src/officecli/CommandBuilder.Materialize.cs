@@ -14,16 +14,19 @@ static partial class CommandBuilder
         var fileArg = new Argument<FileInfo>("file") { Description = "Word document (.docx or .docm)" };
         var strictOpt = new Option<bool>("--strict")
         {
-            Description = "Leave the file unchanged and exit 1 if any altChunk cannot be converted (RTF, MHT, a missing part, or a chunk outside the body). Without --strict, HTML/XHTML/plain-text chunks are still materialized and the rest stay in place."
+            Description = "Leave the file unchanged and exit 1 if any altChunk cannot be converted (RTF, MHT, a missing part, or a chunk outside the body). Without --strict, HTML/XHTML/plain-text chunks are still materialized and the rest stay in place. A picture that cannot be embedded is a warning in both modes: it does not trip --strict, and the rest of that chunk is still converted."
         };
 
         var cmd = new Command("materialize",
             "Replace Word altChunk (htmlchunk) parts with native paragraphs, lists, tables and links. Headless — does not run Microsoft Word. " +
-            "Converts HTML, XHTML and plain text. Subset: headings, paragraphs, bold/italic/underline/strike, color, font size and family, sub/sup, hyperlinks, ul/ol, and tables with colspan/rowspan. " +
+            "Converts HTML, XHTML and plain text. Subset: headings, paragraphs, bold/italic/underline/strike, color, font size and family, sub/sup, hyperlinks, ul/ol, tables with colspan/rowspan, and inline pictures. " +
+            "A data-URI image whose type the picture pipeline already accepts (png, jpeg, gif, bmp, tiff, emf, wmf) becomes an inline w:drawing; the alt attribute is the picture description. " +
+            "webp, svg, video and iframe are not embedded. http(s) URLs are not downloaded and relative paths are not resolved — those images stay as alt text and do not fail the conversion. " +
+            "A data URI that cannot be decoded is the same kind of warning (alt text kept); it does not trip --strict. " +
             "A small CSS subset is honored (element, class, id, descendant and child selectors; text-align, background-color, margin, font). " +
-            "Images are not embedded (alt text is kept), scripts are dropped, and RTF/MHT chunks are left unchanged. " +
+            "Scripts are dropped, and RTF/MHT chunks are left unchanged. " +
             "Formatting is written directly onto runs (matchSrc-style), and h1–h6 also reference Heading styles. " +
-            "Fidelity is not Word's HTML importer — float, flex, borders, media queries and remote images are not reproduced.");
+            "Fidelity is not Word's HTML importer — float, flex, borders and media queries are not reproduced.");
         cmd.Add(fileArg);
         cmd.Add(strictOpt);
         cmd.Add(jsonOption);

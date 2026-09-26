@@ -163,6 +163,8 @@ print(halo("OfficeCLI"))
 h2 "6. Image from a data: URI"
 # Features: <img> with an embedded base64 data URI (relative paths are NOT
 #   resolved inside a chunk — use data: or absolute http(s) URLs), width/height
+# `officecli materialize` embeds data-URI png/jpeg/gif/bmp/tiff/emf/wmf as
+# w:drawing. webp, svg, and http(s)/relative src stay as alt text.
 LOGO=$(base64 < "$DIR/pictures-logo.png" | tr -d '\n')
 officecli add "$FILE" /body --type htmlchunk --prop html="
 <p><img src=\"data:image/png;base64,$LOGO\" width=\"96\" height=\"96\" alt=\"logo\">

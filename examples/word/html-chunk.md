@@ -79,6 +79,23 @@ Parents: `/body` (with `--index` / `--after` / `--before`) and table cells
 Open the file once in Word and **save it** to replace every chunk with native
 content that all viewers understand.
 
+## Headless conversion (`materialize`)
+
+`officecli materialize file.docx` replaces HTML, XHTML and plain-text altChunks
+with native paragraphs, lists, tables and links without opening Word. RTF and
+MHT stay as altChunks. `--strict` refuses to change the file when any whole
+chunk cannot be converted.
+
+Data-URI images whose type the picture pipeline already accepts (png, jpeg,
+gif, bmp, tiff, emf, wmf) are embedded as inline `w:drawing` pictures. The
+`alt` attribute becomes the picture description. webp and svg are not
+embedded. `http(s)` URLs are not downloaded and relative `src` values are not
+resolved; they stay as italic `[image: …]` alt text, and the rest of the chunk
+is still converted. A data URI that fails to decode is the same kind of
+warning and does not trip `--strict`.
+
+See `materialize-altchunk.sh`.
+
 Round-trip: `officecli dump` re-emits body-level HTML/RTF/text chunks as
 `add htmlchunk` items. Chunks inside table cells are reported as a dump warning.
 
