@@ -94,6 +94,27 @@ resolved; they stay as italic `[image: …]` alt text, and the rest of the chunk
 is still converted. A data URI that fails to decode is the same kind of
 warning and does not trip `--strict`.
 
+### CSS borders
+
+Materialize maps a small border subset onto real OOXML. It does not run a browser.
+
+| CSS | Word |
+|---|---|
+| `border`, `border-top` / `right` / `bottom` / `left` | all four edges, or one edge |
+| `border-width`, `border-style`, `border-color` | the matching longhands (1–4 values, the usual box order) |
+| `border-*-width`, `border-*-style`, `border-*-color` | that edge |
+| paragraph, heading, `pre`, or a callout wrapper (`div`, `blockquote`) | `w:pBdr` |
+| `td` / `th` (a `tr` border fills a side the cell did not set) | `w:tcBorders` |
+| every cell has the same four-edge border | `w:tblBorders` too, including inside lines |
+| padding on a bordered paragraph | `w:space` on that edge (points) |
+| padding on a cell | `w:tcMar` (twips) |
+
+Styles Word can draw: `solid` → `single`, `dashed`, `dotted`, `double`, `inset`, `outset`. `none` and `hidden` draw no line (`nil` on a cell, so they cover the table grid). `groove` is drawn as `inset` and `ridge` as `outset`; materialize warns. Any other line style, or a width that is not a length or `thin` / `medium` / `thick`, is dropped and warned. `transparent` draws no line. `currentcolor` and `inherit` use `w:color="auto"`.
+
+A border on a wrapper is copied onto each paragraph inside it. It is not one rectangle around the group. Borders on `span`, `code`, and other inline elements are not turned into run borders. `border-radius`, `border-image`, `border-spacing`, `outline`, `box-shadow`, and logical properties (`border-inline-*`, `border-block-*`) are ignored. `border-collapse` is not modeled separately. The HTML `border` attribute is not read; a table with no CSS border still gets the built-in single grid.
+
+These warnings do not trip `--strict`.
+
 See `materialize-altchunk.sh`.
 
 Round-trip: `officecli dump` re-emits body-level HTML/RTF/text chunks as

@@ -4,7 +4,8 @@
 # Creates a docx with htmlchunk payloads, runs `officecli materialize`, and
 # checks the package: w:altChunk and word/afchunk*.htm are gone, and the body
 # contains real paragraphs, a table (with gridSpan), a hyperlink, and list
-# numbering. A separate file keeps an RTF chunk in place and checks that
+# numbering. The report sample must also keep a callout w:pBdr and a cell
+# w:tcBorders. A separate file keeps an RTF chunk in place and checks that
 # --strict refuses to modify the file.
 #
 # Usage (from the repo root, after `dotnet build -c Release`):
@@ -78,16 +79,213 @@ echo "== styled HTML file (CSS, rowspan, nested list) =="
 STYLED="$WORK/styled.docx"
 "$OFFICECLI" create "$STYLED"
 "$OFFICECLI" add "$STYLED" /body --type htmlchunk --prop matchSrc=true --prop src="$ROOT/examples/word/html-chunk-report.html"
-"$OFFICECLI" materialize "$STYLED"
+"$OFFICECLI" materialize "$STYLED" 2>"$WORK/styled.err"
+if grep -E -q 'border (style|declaration)' "$WORK/styled.err"; then
+  cat "$WORK/styled.err" >&2
+  fail "report sample uses only supported solid borders and should not warn"
+fi
 SXML="$(doc_xml "$STYLED")"
 echo "$SXML" | grep -q 'w:altChunk' && fail "styled chunk was not materialized"
 echo "$SXML" | grep -q '1F4E79' || fail "h1/th CSS color was not applied"
+echo "$SXML" | grep -q 'w:pBdr' || fail "callout/heading paragraph border missing"
+echo "$SXML" | grep -q 'w:tcBorders' || fail "table cell borders missing"
 echo "$SXML" | grep -q 'w:gridSpan' || fail "report colspan missing"
 echo "$SXML" | grep -q 'w:vMerge' || fail "report rowspan missing"
 echo "$SXML" | grep -q 'Jakarta' || fail "table text missing"
 echo "$SXML" | grep -Eq '<w:ilvl w:val="0"[[:space:]]*/>' || fail "top-level ordered list should be ilvl 0"
 echo "$SXML" | grep -Eq '<w:ilvl w:val="1"[[:space:]]*/>' || fail "nested list should be ilvl 1"
+python3 - "$STYLED" <<'PY' || fail "report borders were not mapped onto w:pBdr / w:tcBorders"
+import sys, zipfile
+import xml.etree.ElementTree as ET
+W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+root = ET.fromstring(zipfile.ZipFile(sys.argv[1]).read("word/document.xml"))
+
+def text_of(el):
+    return "".join(t.text or "" for t in el.iter(W + "t"))
+
+def edge(parent, side):
+    if parent is None:
+        return None
+    el = parent.find(W + side)
+    if el is None:
+        return None
+    return (
+        el.get(W + "val"),
+        el.get(W + "sz"),
+        (el.get(W + "color") or "").upper(),
+        el.get(W + "space"),
+    )
+
+found = {"h1": False, "kpi": False, "warn": False, "cell": False, "grid": False}
+for p in root.iter(W + "p"):
+    text = text_of(p)
+    pPr = p.find(W + "pPr")
+    pBdr = pPr.find(W + "pBdr") if pPr is not None else None
+    if "Laporan Penjualan" in text:
+        # h1: border-bottom: 2px solid #1F4E79; padding-bottom: 4px → 3pt
+        got = edge(pBdr, "bottom")
+        if got != ("single", "12", "1F4E79", "3") or edge(pBdr, "left") is not None:
+            sys.exit(f"h1 bottom border: {got}")
+        found["h1"] = True
+    if "Target tercapai" in text:
+        # .kpi: border-left: 6px solid #70AD47; padding 6px 10px → left space 8pt
+        got = edge(pBdr, "left")
+        if got != ("single", "36", "70AD47", "8") or edge(pBdr, "bottom") is not None:
+            sys.exit(f"kpi left border: {got}")
+        found["kpi"] = True
+    if "Perlu perhatian" in text:
+        got = edge(pBdr, "left")
+        if got != ("single", "36", "ED7D31", "8"):
+            sys.exit(f"warn left border: {got}")
+        found["warn"] = True
+
+for tc in root.iter(W + "tc"):
+    if "Jakarta" not in text_of(tc):
+        continue
+    tcPr = tc.find(W + "tcPr")
+    borders = tcPr.find(W + "tcBorders") if tcPr is not None else None
+    for side in ("top", "left", "bottom", "right"):
+        got = edge(borders, side)
+        if got != ("single", "6", "9BC2E6", None):
+            sys.exit(f"Jakarta {side} border: {got}")
+    # The cell border must not also be painted as a paragraph border.
+    for p in tc.iter(W + "p"):
+        pPr = p.find(W + "pPr")
+        if pPr is not None and pPr.find(W + "pBdr") is not None:
+            sys.exit("cell paragraph grew a w:pBdr from the td border")
+    mar = tcPr.find(W + "tcMar")
+    if mar is None:
+        sys.exit("cell padding was not written as w:tcMar")
+    if mar.find(W + "top").get(W + "w") != "60" or mar.find(W + "left").get(W + "w") != "120":
+        sys.exit("cell padding is not 4px 8px")
+    found["cell"] = True
+    break
+
+for tbl in root.iter(W + "tbl"):
+    tblPr = tbl.find(W + "tblPr")
+    tblBdr = tblPr.find(W + "tblBorders") if tblPr is not None else None
+    for side in ("top", "insideH", "insideV"):
+        got = edge(tblBdr, side)
+        if got != ("single", "6", "9BC2E6", None):
+            sys.exit(f"table grid {side}: {got}")
+    found["grid"] = True
+    break
+
+missing = [k for k, v in found.items() if not v]
+if missing:
+    sys.exit("missing " + ", ".join(missing))
+PY
 "$OFFICECLI" validate "$STYLED" >/dev/null
+
+echo "== CSS border styles, cascade, and approximations =="
+BORDERS="$WORK/borders.docx"
+"$OFFICECLI" create "$BORDERS"
+"$OFFICECLI" add "$BORDERS" /body --type htmlchunk --prop html='<style>
+  p.box { border: 1px solid #0000FF; }
+  p.box.kpi { border-left: 6px solid #00AA00; }
+  p.imp { border-left-color: #0000FF !important; }
+  p.imp { border: 1px solid #FF0000; }
+  blockquote.note { border-left: 4px solid #A5A5A5; padding-left: 10px; }
+</style>
+<p style="border:1px dashed #BF9000;padding:4px">dashed note</p>
+<p style="border-width:2pt;border-style:dotted;border-color:green">dotted box</p>
+<p style="border: solid 2px #123456">reordered</p>
+<p style="border-top:3pt double #112233">double top</p>
+<p class="box kpi">mixed cascade</p>
+<p class="imp">important color</p>
+<blockquote class="note"><p>quoted line</p></blockquote>
+<p style="border:2px wavy red">wavy skip</p>
+<p style="border-left:4px groove #445566">groove side</p>
+<table><tr><td style="border:1px dashed #BF9000">dashcell</td></tr></table>
+<table><tr><td style="border-top:1px solid #FF0000;border-bottom:1px solid #0000FF">splitcell</td></tr></table>'
+"$OFFICECLI" materialize "$BORDERS" --strict 2>"$WORK/borders.err"
+grep -q '1 CSS border style(s) approximated' "$WORK/borders.err" || fail "expected one groove/ridge approximation warning"
+grep -q '1 CSS border declaration(s) ignored' "$WORK/borders.err" || fail "expected one unsupported-style warning"
+python3 - "$BORDERS" <<'PY' || fail "border style mapping did not match OOXML"
+import sys, zipfile
+import xml.etree.ElementTree as ET
+W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+root = ET.fromstring(zipfile.ZipFile(sys.argv[1]).read("word/document.xml"))
+
+def text_of(el):
+    return "".join(t.text or "" for t in el.iter(W + "t"))
+
+def edge(parent, side):
+    if parent is None:
+        return None
+    el = parent.find(W + side)
+    if el is None:
+        return None
+    return (
+        el.get(W + "val"),
+        el.get(W + "sz"),
+        (el.get(W + "color") or "").upper(),
+        el.get(W + "space"),
+    )
+
+def p_bdr(needle):
+    for p in root.iter(W + "p"):
+        if needle not in text_of(p):
+            continue
+        pPr = p.find(W + "pPr")
+        return pPr.find(W + "pBdr") if pPr is not None else None
+    sys.exit(f"paragraph not found: {needle}")
+
+def expect(needle, side, want):
+    got = edge(p_bdr(needle), side)
+    if got != want:
+        sys.exit(f"{needle} {side}: {got} != {want}")
+
+expect("dashed note", "top", ("dashed", "6", "BF9000", "3"))
+expect("dashed note", "left", ("dashed", "6", "BF9000", "3"))
+expect("dotted box", "right", ("dotted", "16", "008000", None))
+expect("reordered", "bottom", ("single", "12", "123456", None))
+expect("double top", "top", ("double", "24", "112233", None))
+if edge(p_bdr("double top"), "left") is not None:
+    sys.exit("double top should not paint the left edge")
+expect("mixed cascade", "left", ("single", "36", "00AA00", None))
+expect("mixed cascade", "top", ("single", "6", "0000FF", None))
+expect("important color", "left", ("single", "6", "0000FF", None))
+expect("important color", "top", ("single", "6", "FF0000", None))
+expect("quoted line", "left", ("single", "24", "A5A5A5", "8"))
+if p_bdr("wavy skip") is not None:
+    sys.exit("unsupported wavy style should not emit w:pBdr")
+expect("groove side", "left", ("inset", "24", "445566", None))
+
+def cell_borders(needle):
+    for tc in root.iter(W + "tc"):
+        if needle not in text_of(tc):
+            continue
+        tcPr = tc.find(W + "tcPr")
+        return tcPr.find(W + "tcBorders") if tcPr is not None else None
+    sys.exit(f"cell not found: {needle}")
+
+for side in ("top", "left", "bottom", "right"):
+    got = edge(cell_borders("dashcell"), side)
+    if got != ("dashed", "6", "BF9000", None):
+        sys.exit(f"dashcell {side}: {got}")
+split = cell_borders("splitcell")
+if edge(split, "top") != ("single", "6", "FF0000", None):
+    sys.exit(f"splitcell top: {edge(split, 'top')}")
+if edge(split, "bottom") != ("single", "6", "0000FF", None):
+    sys.exit(f"splitcell bottom: {edge(split, 'bottom')}")
+if edge(split, "left") is not None:
+    sys.exit("splitcell should leave the left edge to the table grid")
+
+# Uniform dashed cell also replaces the table grid.
+found_grid = False
+for tbl in root.iter(W + "tbl"):
+    if "dashcell" not in text_of(tbl):
+        continue
+    tblBdr = tbl.find(W + "tblPr").find(W + "tblBorders")
+    got = edge(tblBdr, "insideH")
+    if got != ("dashed", "6", "BF9000", None):
+        sys.exit(f"dashed table grid: {got}")
+    found_grid = True
+if not found_grid:
+    sys.exit("dashed table grid missing")
+PY
+"$OFFICECLI" validate "$BORDERS" >/dev/null
 
 echo "== chunk inside a table cell =="
 CELL="$WORK/cell.docx"
