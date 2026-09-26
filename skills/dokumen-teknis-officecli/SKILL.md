@@ -167,6 +167,8 @@ officecli add "$FILE" /body --type toc \
 
 # Setelah heading final ada: isi entri (judul + hyperlink) tanpa Word.
 officecli refresh "$FILE" --toc
+# Atau biarkan `officecli finalize` di akhir (lihat bawah) — langkah itu
+# sudah mencakup refresh --toc bila field TOC ada.
 ```
 
 `title` memakai style TOCHeading dan **tidak** masuk daftar. Jangan memakai Heading1 untuk judul "Daftar Isi" — paragraf itu ikut terkumpul sebagai entri.
@@ -242,6 +244,25 @@ officecli add "$FILE" / --type footer --prop type=first --prop text=""
 
 Ekspor PNG; sisipkan native image atau `<img src="data:image/png;base64,…">` di htmlchunk. Selalu isi `alt`. `officecli materialize` menyematkan data-URI png/jpeg/gif/bmp/tiff/emf/wmf sebagai `w:drawing` (alt jadi deskripsi gambar). webp, svg, serta URL http(s) atau path relatif tetap teks alt dan tidak menggagalkan konversi. Border CSS pada paragraf, callout, atau sel tabel ikut menjadi `w:pBdr` / `w:tcBorders` (`solid`, `dashed`, `dotted`, `double`, `inset`, `outset`). Border pada `span`/`code`, `border-radius`, dan `border-image` tidak dipetakan. Daftar bersarang (`ul`/`ol` di dalam `li`) memakai satu `numId`; `ilvl` adalah kedalaman. Daftar terpisah, termasuk daftar di sel tabel, mendapat `numId` sendiri.
 
+### Langkah akhir (`finalize`)
+
+Setelah isi, heading, field TOC, dan htmlchunk selesai, satu perintah headless menutup build. Tidak menjalankan Word dan tidak menghitung nomor halaman sungguhan.
+
+```bash
+officecli finalize "$FILE"
+# Default, berurutan:
+#   1. materialize     HTML/XHTML/teks → native (RTF/MHT tetap, sama seperti materialize)
+#   2. refresh --toc   hanya jika ada field TOC; PAGEREF tetap placeholder 0
+#   3. page setup      pageSetup=a4-moderate hanya pada section tanpa w:pgSz
+#   4. validate        skema OpenXML; error → exit 1, langkah sebelumnya tetap
+```
+
+Lewati langkah: `--no-materialize`, `--no-toc`, `--no-page-setup`, `--no-validate`. `--strict` sama seperti `materialize --strict`: file tidak diubah, langkah berikutnya tidak jalan, exit 1. `--json` satu envelope; `data.steps[]` memakai status `ran`, `skipped`, `failed`, atau `not-run`.
+
+**Page setup tidak menimpa ukuran halaman yang sudah ada.** `officecli create` sudah menulis A4 (`w:pgSz`), jadi `finalize` tidak mengganti margin dokumen itu menjadi Moderate. Tetap panggil `set /section[1] --prop pageSetup=a4-moderate` saat membuat dokumen. `finalize` hanya mengisi preset itu pada section yang tidak punya `w:pgSz` (margin preset ikut tertulis di section itu).
+
+Materialize jalan sebelum TOC, jadi heading di dalam htmlchunk ikut terkumpul. Nomor halaman entri tetap `0` sampai di-update di Word.
+
 ## Alur kerja agen (checklist)
 
 1. Kumpulkan meta + outline + aset logo.
@@ -250,14 +271,14 @@ Ekspor PNG; sisipkan native image atau `<img src="data:image/png;base64,…">` d
 4. Cover htmlchunk → page break → front matter → **TOC field (hyperlinks)** → bab.
 5. Semua daftar bertingkat memakai `listStyle=ordered|bullet` (bukan angka di string).
 6. Header/footer field PAGE.
-7. QA:
-   - `officecli validate "$FILE"`
+7. Tutup build: `officecli finalize "$FILE"` (materialize + `refresh --toc` bila ada field TOC + validate). Page setup A4+Moderate tetap di langkah 3 — `finalize` tidak menimpa `w:pgSz` yang sudah ada.
+8. QA:
    - `officecli view "$FILE" outline`
-   - `officecli refresh "$FILE" --toc` lalu cek entri TOC memuat judul heading (nomor halaman boleh `0`)
+   - Cek entri TOC memuat judul heading (nomor halaman boleh `0`)
    - Spot-check satu list (mis. § pengguna): `listStyle`/`numId` ada; teks tanpa prefix `1.`
    - Heading2 spaceBefore ≈ 14pt
-   - Buka di Word agar altChunk terkonversi; Update Field pada TOC bila perlu
-8. Serahkan `.docx`; sebutkan jika altChunk masih mentah.
+   - Update Field di Word hanya bila nomor halaman sungguhan diperlukan
+9. Serahkan `.docx`. Sebutkan jika `finalize` melaporkan altChunk yang sengaja dibiarkan (RTF/MHT) atau validate gagal.
 
 
 ## Mono inline (chip GitHub) — wajib
@@ -370,6 +391,8 @@ officecli help docx paragraph   # listStyle, spaceBefore
 officecli help docx style       # spaceBefore pada Heading/Normal
 officecli add doc.docx /body --type toc --prop levels=1-3 --prop hyperlinks=true
 officecli add doc.docx /body --type paragraph --prop listStyle=ordered --prop text='…'
+officecli finalize doc.docx     # materialize + refresh --toc + validate
+officecli finalize --help       # --no-materialize, --no-toc, --no-page-setup, --no-validate, --strict
 ```
 
 Contoh fork: `examples/word/html-chunk.sh` di `integra-id/OfficeCLI` branch fitur htmlchunk.
