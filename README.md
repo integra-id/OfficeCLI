@@ -13,6 +13,218 @@ Open-source. Single binary. No Office installation. No dependencies. Works every
 
 **English** | [中文](README_zh.md) | [日本語](README_ja.md) | [한국어](README_ko.md)
 
+> **This repository is the [integra-id/OfficeCLI](https://github.com/integra-id/OfficeCLI) fork** of [iOfficeAI/OfficeCLI](https://github.com/iOfficeAI/OfficeCLI). The working line is `feature/html-chunk` (not `main`). It keeps the upstream CLI and adds a headless Word pipeline for technical documents. Read [This fork](#this-fork-headless-word-technical-documents) first if you are contributing or writing a skill.
+
+## This fork: headless Word technical documents
+
+Upstream OfficeCLI already creates and edits `.docx` / `.xlsx` / `.pptx` with no Office install. This fork’s branch adds the pieces a technical-document skill needs: embed HTML as `w:altChunk`, turn supported chunks into native OOXML without Word, rebuild TOC entries, apply an A4 + Moderate page preset, and fit ID columns so short codes stay on one line.
+
+Assembly version on this branch: `1.0.152-htmlchunk.1` (`src/officecli/officecli.csproj`). The guide below is the upstream README. Fork-only behavior is this section, [examples/word/html-chunk.md](examples/word/html-chunk.md), and the skills under `skills/`.
+
+### What this fork adds
+
+| Piece | Role |
+| --- | --- |
+| `add --type htmlchunk` | Store HTML, XHTML, MHT, RTF, or plain text as a Word `w:altChunk` (aliases `html`, `altchunk`). |
+| `materialize` | Replace HTML / XHTML / plain-text chunks with native paragraphs, lists, tables, links, and accepted data-URI pictures. RTF and MHT stay. |
+| `refresh --toc` | Rebuild TOC entry titles and in-document hyperlinks. `PAGEREF` page numbers are the placeholder `0`. |
+| `pageSetup` / `pageSize` / `margins` | Named presets. `a4-moderate` (aliases `tech-doc`, `techdoc`) is A4 plus Word’s Moderate margins. |
+| ID columns | `idColumn` / `idColumns` / `noWrap` / `width=fit` on native tables. Htmlchunk cells with class `col-id` or `white-space: nowrap` get the same treatment when materialized. |
+| `finalize` | One headless pass: materialize, then TOC (if a TOC field exists), then `a4-moderate` only on sections with no `w:pgSz`, then schema validate. |
+| Skills | `dokumen-teknis-officecli` and `rule-gaya-dokumen-teknis`, registered in `SkillMap`. |
+
+Excel, PowerPoint, and the rest of the Word DOM are the upstream commands documented further down.
+
+### Build and run
+
+Compilation needs the [.NET 10 SDK](https://dotnet.microsoft.com/download). The published binary is self-contained; the SDK is not required at runtime.
+
+Framework-dependent build (the smoke scripts look for this binary; running it needs the .NET 10 runtime):
+
+```bash
+dotnet build -c Release src/officecli/officecli.csproj
+# src/officecli/bin/Release/net10.0/officecli
+# or src/officecli/bin/Release/net10.0/<rid>/officecli
+```
+
+Self-contained publish for the machine you are on (`./build.sh` detects the RID and writes `bin/release/`):
+
+```bash
+./build.sh            # Release, current platform (default)
+./build.sh debug
+./build.sh all        # every RID listed in build.sh (includes macOS)
+./dev-install.sh      # publish Release for this machine and copy onto PATH
+```
+
+`./build.sh` usage is only `release`, `debug`, or `all`. Fork CI (`.github/workflows/build.yml`) publishes Linux and Windows RIDs (`linux-x64`, `linux-arm64`, `linux-musl-x64`, `linux-musl-arm64`, `win-x64`, `win-arm64`). It does not publish macOS binaries; a local `./build.sh` on macOS still can.
+
+Check the binary you built:
+
+```bash
+officecli --help
+officecli materialize --help
+officecli finalize --help
+officecli help docx htmlchunk
+officecli help docx section
+officecli help docx table-column
+```
+
+### `htmlchunk` (altChunk)
+
+```bash
+officecli create spec.docx
+officecli add spec.docx /body --type htmlchunk \
+  --prop html='<h2>Report</h2><p>Sales grew <b>12%</b>.</p>'
+officecli add spec.docx /body --type htmlchunk --prop src=page.html --prop matchSrc=true
+officecli add spec.docx "/body/tbl[1]/tr[1]/tc[2]" --type htmlchunk --prop html='<p>In a cell</p>'
+```
+
+| Property | Meaning |
+| --- | --- |
+| `html` | Inline markup. Aliases: `content`, `text`. Wins over `src`. |
+| `src` | File to embed. Alias: `path`. Format is inferred from the extension. |
+| `format` | `html` (default), `xhtml`, `mht`, `rtf`, `text`. |
+| `matchSrc` | `true` writes `<w:matchSrc/>` so Word keeps the chunk’s own formatting. |
+| `title` | `<title>` of the wrapper around an HTML fragment. |
+
+Parents are `/body` (with `--index`, `--after`, or `--before`) and a body table cell. Headers, footers, footnotes, and endnotes are rejected. A fragment without `<html>` or `<!DOCTYPE>` is wrapped as UTF-8 HTML; a complete document from `src` is stored as-is. `add` returns `/body/altChunk[N]`. Until Word re-saves the file, or you run `materialize`, the chunk is one opaque node: `get` shows format and size, and `view html` shows the source as escaped text.
+
+Walkthrough and the generated sample: [examples/word/html-chunk.md](examples/word/html-chunk.md), [examples/word/html-chunk.sh](examples/word/html-chunk.sh).
+
+### `materialize`
+
+```bash
+officecli materialize spec.docx
+officecli materialize spec.docx --strict
+officecli materialize spec.docx --json
+```
+
+Headless. Does not run Microsoft Word. Converts HTML, XHTML, and plain text into native paragraphs, lists, tables (including colspan / rowspan), hyperlinks, and inline pictures. Formatting is written on the runs; `h1`–`h6` also reference Heading styles. RTF and MHT chunks are left in place. Scripts are dropped. Float, flex, grid, and media queries are not reproduced.
+
+Pictures: a data-URI whose type the picture pipeline already accepts (`png`, `jpeg`, `gif`, `bmp`, `tiff`, `emf`, `wmf`) becomes an inline `w:drawing`. The `alt` attribute is the description. `webp`, `svg`, video, and iframe are not embedded. `http(s)` URLs are not downloaded and relative `src` values are not resolved; those stay as italic `[image: …]` text and the rest of the chunk is still converted. A data URI that fails to decode is the same kind of warning. Picture warnings do not trip `--strict`. `officecli materialize --help` is the converter contract. The `htmlchunk` element note (`officecli help docx htmlchunk`) still says images are not embedded; that sentence is behind the converter.
+
+`--strict` leaves the file unchanged and exits 1 when any whole chunk cannot be converted (RTF, MHT, a missing part, or a chunk outside the body). Without `--strict`, convertible chunks are still written and the rest stay.
+
+CSS borders are a subset mapped to `w:pBdr` / `w:tcBorders` (and `w:tblBorders` when every cell shares the same four-edge border). Word line styles kept: `solid`, `dashed`, `dotted`, `double`, `inset`, `outset`. `groove` is drawn as `inset` and `ridge` as `outset` (a warning). The mapping, and what is ignored (`border-radius`, inline borders, and the rest), is tabulated in [examples/word/html-chunk.md](examples/word/html-chunk.md). Those warnings do not trip `--strict`.
+
+Nested lists: a `ul` / `ol` inside an `li` (including one wrapped in a `div` or `blockquote`) is one numbering instance. Every item in that tree shares a single `w:numId`. `w:ilvl` is the depth, clamped at 8. A list outside that tree — the next list in the body, or any list in a table cell — gets its own `numId`.
+
+### `refresh --toc`
+
+```bash
+officecli add spec.docx /body --type toc \
+  --prop title="Contents" --prop levels=1-3 \
+  --prop hyperlinks=true --prop pageNumbers=true
+officecli refresh spec.docx --toc
+```
+
+`--toc` rebuilds TOC entries from the current headings (titles and in-document hyperlinks) and writes every `PAGEREF` result as `0`. It does not run Word or a browser, and it does not keep page numbers that were resolved earlier. Property names for the field itself: `officecli help docx toc`.
+
+Omit `--toc` to try Microsoft Word on Windows first, then HTML pagination when a headless browser exists. If neither can number pages, entries are still rebuilt and page numbers stay `0`. `.docx` / `.docm` only.
+
+### Page setup
+
+```bash
+officecli set spec.docx /section[1] --prop pageSetup=a4-moderate
+# alias: --prop pageSetup=tech-doc
+officecli set spec.docx /section[1] --prop pageSize=a4 --prop margins=moderate
+```
+
+`a4-moderate` / `tech-doc` / `techdoc` sets A4 (210×297 mm, 11906×16838 twips) and Word Moderate body margins: top/bottom 2.54 cm (1 in / 25.4 mm), left/right 1.905 cm (0.75 in / 19.05 mm). Header and footer distance is not part of the preset. The same `pageSetup`, `pageSize`, and `margins` keys exist on the final section via the document properties (`officecli help docx document`).
+
+`pageSize`: `a4`, `letter`, or `none` (removes `w:pgSz`). `margins` (alias key `marginPreset`): `normal`, `narrow`, `moderate`, `wide`. An explicit `pageWidth` / `pageHeight` / `margin*` in the same call overrides the preset. `orientation=landscape` swaps the edges after a size preset.
+
+`officecli create` already writes an A4 `w:pgSz` and its own margins (not Moderate). Setting `pageSetup=a4-moderate` on the section is what applies Moderate. `finalize` will not overwrite a section that already has `w:pgSz`.
+
+### Table helpers (ID columns)
+
+An ID column is a short code such as `T-01`, `NFR-01`, or `FR-001`. Marking it writes `w:noWrap` on each single-span cell that starts in the column and sizes `w:gridCol` / `w:tcW` to the longest line: `max(18mm, longest × 2.0mm + 8mm)`. A Latin character counts as 1; a full-width character counts as about 1.8. Six Latin characters (`NFR-01`) → 1134 twips. Other columns are not resized. A table whose width is in twips (`dxa`) shifts by the same delta.
+
+```bash
+officecli set spec.docx "/body/tbl[1]/col[1]" --prop idColumn=true
+officecli set spec.docx "/body/tbl[1]/col[2]" --prop noWrap=true
+officecli set spec.docx "/body/tbl[1]/col[2]" --prop width=fit
+officecli set spec.docx "/body/tbl[1]" --prop idColumns=1,3
+officecli add spec.docx /body --type table --prop rows=3 --prop cols=3 --prop idColumn=1
+```
+
+| Form | Effect |
+| --- | --- |
+| `set …/col[C] --prop idColumn=true` | `w:noWrap` plus the fit width. `false` removes `w:noWrap` and leaves the width. An explicit `width=` on the same call is used instead of the fit. |
+| `set …/col[C] --prop noWrap=true` | Wrap only. Alias `nowrap`. Does not change the width. |
+| `set …/col[C] --prop width=fit` | Fit width only (`auto` is the same). Does not change wrap. |
+| `set …/tbl[N] --prop idColumn=1` or `idColumns=1,3` | 1-based indexes on the table. A boolean is not accepted on the table path. |
+| `add --type table --prop idColumn=1` | Same index form, applied after the grid and cells exist. |
+
+Htmlchunk, consumed by `materialize`: a `td` / `th` with class `col-id`, or with `white-space: nowrap` (inline or from a class/id/element rule the converter understands), marks that grid column when the cell’s colspan is 1. A colspan cell keeps `w:noWrap` on itself and does not resize the column.
+
+```html
+<td class="col-id">NFR-01</td>
+```
+
+Schema: `officecli help docx table-column` and `officecli help docx table`.
+
+### `finalize`
+
+```bash
+officecli finalize spec.docx
+officecli finalize spec.docx --strict --json
+officecli finalize spec.docx --no-materialize --no-page-setup
+```
+
+One headless pass for a `.docx` or `.docm`, in this order:
+
+1. **materialize** — HTML, XHTML, and plain text, same rules as `materialize` (RTF and MHT stay).
+2. **`refresh --toc`** — only when the file has a TOC field. Titles and in-document hyperlinks are rebuilt. `PAGEREF` stays `0`. No Word and no browser. Skipped when there is no TOC field. Materialize runs first, so a heading that lived inside an HTML chunk is collected.
+3. **page setup** — `pageSetup=a4-moderate` only on sections that have no `w:pgSz`. A section that already has a page size is left alone, including the A4 size `officecli create` writes, so its margins stay. A section that has margins but no `w:pgSz` receives the preset’s Moderate margins as well.
+4. **validate** — OpenXML schema. Errors are reported and the command exits 1. Earlier steps are kept.
+
+Skip a step with `--no-materialize`, `--no-toc`, `--no-page-setup`, or `--no-validate`. `--strict` is materialize’s `--strict`: the file is left unchanged, later steps do not run, and the command exits 1. If the TOC rebuild fails, later steps are not run either. `--json` prints one envelope; `data.steps[]` uses `ran`, `skipped`, `failed`, or `not-run`.
+
+This command does not calculate real page numbers. Apply `pageSetup=a4-moderate` yourself while authoring if the section already has `w:pgSz`.
+
+### Skills
+
+Both skills ship in the repo and are registered in `SkillMap` (`src/officecli/Core/SkillInstaller.cs`). Names stay generic. `dokumen-teknis-officecli` is the build guide for a technical Word document (cover, TOC, htmlchunk, page setup, ID columns, `finalize`). `rule-gaya-dokumen-teknis` is the short style checklist that points at that guide.
+
+```bash
+officecli skills list
+officecli skills install dokumen-teknis-officecli
+officecli skills install rule-gaya-dokumen-teknis
+officecli load_skill dokumen-teknis-officecli
+officecli load_skill rule-gaya-dokumen-teknis
+```
+
+`skills install <name>` copies the skill into every detected agent skill directory. `load_skill <name>` prints the embedded `SKILL.md` without installing it. `load_skill` with no name lists the catalog. Sources: [skills/dokumen-teknis-officecli/SKILL.md](skills/dokumen-teknis-officecli/SKILL.md), [skills/rule-gaya-dokumen-teknis/SKILL.md](skills/rule-gaya-dokumen-teknis/SKILL.md).
+
+### Smoke examples
+
+These scripts live under [examples/word/](examples/word/). They are not invented wrappers. The four smoke scripts expect a Release build and default `OFFICECLI` to `src/officecli/bin/Release/net10.0/officecli` or `…/linux-x64/officecli`. Override with `OFFICECLI=/path/to/officecli`. Run them from the repo root.
+
+| Script | What it exercises |
+| --- | --- |
+| [examples/word/html-chunk.sh](examples/word/html-chunk.sh) | Showcase. Builds `html-chunk.docx` (HTML, RTF, text, in-cell chunk). Run from `examples/word/`. Python twin: `html-chunk.py`. |
+| [examples/word/materialize-altchunk.sh](examples/word/materialize-altchunk.sh) | `materialize`, including data-URI pictures, CSS borders, shared `numId` nested lists, and `--strict` leaving RTF in place. |
+| [examples/word/toc-refresh.sh](examples/word/toc-refresh.sh) | `refresh --toc`. Asserts titles and hyperlinks, and that `PAGEREF` stays `0`. |
+| [examples/word/table-id-column.sh](examples/word/table-id-column.sh) | `idColumn`, `idColumns`, `noWrap`, `width=fit`. |
+| [examples/word/finalize.sh](examples/word/finalize.sh) | Default `finalize` order, skip flags, `--strict`, `--json`, and the “do not overwrite an existing `w:pgSz`” rule. |
+
+```bash
+dotnet build -c Release src/officecli/officecli.csproj
+bash examples/word/finalize.sh
+bash examples/word/materialize-altchunk.sh
+bash examples/word/toc-refresh.sh
+bash examples/word/table-id-column.sh
+( cd examples/word && bash html-chunk.sh )
+```
+
+### Known limits
+
+- **TOC page numbers.** `refresh --toc` and the TOC step inside `finalize` write `PAGEREF` as `0`. Real page numbers need Microsoft Word (Update Field), or `officecli refresh` without `--toc` where Word on Windows or a headless browser can paginate. Do not treat `0` as a finished page number. `officecli view` pagination can also disagree with Word.
+- **Nested-list restart.** The shared list is `hybridMultilevel` and does not write `w:lvlRestart`. ECMA-376 says a hybrid level with no `lvlRestart` does not restart, so Word may keep a nested ordered counter going across parent items (a, b under item 1, then c under item 2). `officecli view` restarts a level whose `lvlRestart` is omitted whenever a shallower level advances, and it does not special-case hybrid lists, so the preview can restart where Word continues. `start` on the outermost list is that level’s `w:start`. `start` on a nested list is one `w:startOverride` for that `ilvl` of the shared instance: it applies to the whole level, not to one sublist. `start="1"` adds no override. The `type` attribute on `ol` is not read.
+- **`finalize` page setup does not restyle a document `create` already sized.** Sections with `w:pgSz` keep their margins. Set `pageSetup=a4-moderate` while building the file.
+- **Materialize is not Word’s HTML importer.** Unsupported pictures, remote images, RTF/MHT, and the CSS gaps above stay warnings or leftover altChunks. `--strict` only refuses when a whole chunk cannot be converted.
+
 <p align="center">
   <strong>🌐 Website:</strong> <a href="https://officecli.ai" target="_blank">officecli.ai</a> &nbsp;|&nbsp; <strong>💬 Community:</strong> <a href="https://discord.gg/2QAwJn7Egx" target="_blank">Discord</a>
 </p>
@@ -525,7 +737,9 @@ officecli get report.docx /body --depth 1 --json
 | `view <file> issues` | Enumerate document issues (text overflow, missing alt text, formula errors, ...) |
 | [`batch`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-batch) | Multiple operations applied in a single pass (stdin, `--input`, or `--commands`; atomic by default — any failed item rolls back the whole batch — `--best-effort` to keep partial progress, `--stop-on-error` to abort early) |
 | [`dump`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-dump) | Serialize a `.docx`, `.pptx`, or `.xlsx` into a replayable batch JSON (round-trip via `batch`); accepts a subtree path |
-| [`refresh`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-refresh) | Recalculate TOC page numbers / `PAGE` / cross-references (`.docx`; Word backend on Windows, headless-HTML fallback) |
+| [`refresh`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-refresh) | Recalculate derived fields (`.docx` / `.docm`). `--toc` rebuilds TOC entries and writes `PAGEREF` as `0` (no Word, no browser). Without `--toc`: Word on Windows, then HTML pagination; entries are still rebuilt if neither can number pages. See [This fork](#refresh---toc). |
+| `materialize` | Replace HTML / XHTML / plain-text `w:altChunk` parts with native OOXML. RTF and MHT stay. `--strict` refuses the whole file when a chunk cannot be converted. `--json`. See [This fork](#materialize). |
+| `finalize` | Headless technical-doc pass: materialize → `refresh --toc` if a TOC field exists → `pageSetup=a4-moderate` only on sections with no `w:pgSz` → validate. Skip with `--no-materialize`, `--no-toc`, `--no-page-setup`, `--no-validate`. `--strict`, `--json`. See [This fork](#finalize). |
 | [`plugins`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-plugins) | List / inspect / lint installed plugins (extend to `.doc`, `.hwpx`, `.pdf` export via dump-reader / exporter / format-handler kinds) |
 | [`merge`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-merge) | Template merge — replace `{{key}}` placeholders with JSON data |
 | [`watch`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-watch) | Live HTML preview in browser with auto-refresh |
@@ -636,16 +850,19 @@ The [Wiki](https://github.com/iOfficeAI/OfficeCLI/wiki) has detailed guides for 
 
 - **By format:** [Word](https://github.com/iOfficeAI/OfficeCLI/wiki/word-reference) | [Excel](https://github.com/iOfficeAI/OfficeCLI/wiki/excel-reference) | [PowerPoint](https://github.com/iOfficeAI/OfficeCLI/wiki/powerpoint-reference)
 - **Workflows:** [End-to-end examples](https://github.com/iOfficeAI/OfficeCLI/wiki/workflows) -- Word reports, Excel dashboards, PowerPoint decks, batch modifications, resident mode
-- **Runnable examples:** [examples/](examples/) -- copy-paste scripts (.sh/.py) for Word, Excel, and PowerPoint, with output files included
+- **This fork:** [headless Word technical documents](#this-fork-headless-word-technical-documents) — `htmlchunk`, `materialize`, `refresh --toc`, page presets, ID columns, `finalize`, and the two in-repo skills
+- **Runnable examples:** [examples/](examples/) -- copy-paste scripts (.sh/.py) for Word, Excel, and PowerPoint, with output files included. Fork smoke scripts: [examples/word/](examples/word/) (`finalize.sh`, `materialize-altchunk.sh`, `toc-refresh.sh`, `table-id-column.sh`)
 - **Troubleshooting:** [Common errors and solutions](https://github.com/iOfficeAI/OfficeCLI/wiki/troubleshooting)
 - **AI agent guide:** [Decision tree for navigating the wiki](https://github.com/iOfficeAI/OfficeCLI/wiki/agent-guide)
 
 ## Build from Source
 
-Requires [.NET 10 SDK](https://dotnet.microsoft.com/download) for compilation only. The output is a self-contained, native binary -- .NET is embedded in the binary and is not needed at runtime.
+Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download) to compile. `./build.sh` publishes a self-contained binary (the runtime is embedded). `dotnet build` without `-r` is framework-dependent and needs the .NET 10 runtime to run. Fork-specific commands, smoke scripts, and the CI RID list are in [Build and run](#build-and-run).
 
 ```bash
-./build.sh
+dotnet build -c Release src/officecli/officecli.csproj
+./build.sh          # self-contained Release for this machine → bin/release/
+./dev-install.sh    # publish and copy onto PATH
 ```
 
 ## License
