@@ -843,6 +843,8 @@ public partial class WordHandler
         var atomicSnapshot = _doc.MainDocumentPart!.Document!.OuterXml;
         try
         {
+        // Presets before the per-edge cases so pageWidth/margin* override them.
+        ApplyNamedPagePresets(sectPr, effectiveProps);
         foreach (var (key, value) in effectiveProps)
         {
             switch (key.ToLowerInvariant())
@@ -865,6 +867,26 @@ public partial class WordHandler
                         "nextcolumn" or "column" => SectionMarkValues.NextColumn,
                         _ => throw new ArgumentException($"Invalid section break type: '{value}'. Valid values: nextPage (alias: newPage/page), continuous, evenPage, oddPage, nextColumn.")
                     };
+                    break;
+                case "pagesetup":
+                    if (!WordPageDefaults.TryGetPageSetupPreset(value, out _, out _))
+                        throw new ArgumentException(
+                            $"Unknown pageSetup preset: '{value}'. Valid: {WordPageDefaults.PageSetupPresetList}.");
+                    break;
+                case "pagesize":
+                    // Named sizes and pageSize=none are applied by
+                    // ApplyNamedPagePresets before this loop (none strips w:pgSz).
+                    // Do not strip again here — an explicit pageWidth in the same
+                    // call must still win.
+                    if (!string.Equals(value, "none", StringComparison.OrdinalIgnoreCase)
+                        && !WordPageDefaults.TryGetPageSizePreset(value, out _))
+                        throw new ArgumentException(
+                            $"Unknown pageSize preset: '{value}'. Valid: {WordPageDefaults.PageSizePresetList}, or none to remove w:pgSz. For a custom size use pageWidth and pageHeight.");
+                    break;
+                case "margins" or "marginpreset":
+                    if (!WordPageDefaults.TryGetMarginPreset(value, out _))
+                        throw new ArgumentException(
+                            $"Unknown margins preset: '{value}'. Valid: {WordPageDefaults.MarginPresetList}. For custom edges use marginTop/marginBottom/marginLeft/marginRight.");
                     break;
                 case "pagewidth" or "pageWidth" or "width":
                 {

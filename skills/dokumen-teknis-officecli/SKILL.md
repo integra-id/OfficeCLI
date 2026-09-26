@@ -99,7 +99,10 @@ rm -f "$FILE"
 officecli create "$FILE"
 officecli open "$FILE"
 
-# Page setup A4 + margin Moderate (cek properti persis via help)
+# Page setup A4 + margin Moderate (Word: atas/bawah 25,4 mm / 1", kiri/kanan 19,05 mm / 0,75")
+officecli set "$FILE" /section[1] --prop pageSetup=a4-moderate
+# setara: --prop pageSetup=tech-doc
+# atau terpisah: --prop pageSize=a4 --prop margins=moderate
 officecli help docx section
 ```
 
@@ -237,7 +240,7 @@ Ekspor PNG; sisipkan native image atau `<img src="data:image/png;base64,…">` d
 
 1. Kumpulkan meta + outline + aset logo.
 2. Outline Heading 1–3 bernomor konsisten.
-3. `officecli create` + page setup A4/20mm + **set spaceBefore/spaceAfter** pada Normal & Heading1–3.
+3. `officecli create` + `set /section[1] --prop pageSetup=a4-moderate` (A4 + margin Moderate) + **set spaceBefore/spaceAfter** pada Normal & Heading1–3.
 4. Cover htmlchunk → page break → front matter → **TOC field (hyperlinks)** → bab.
 5. Semua daftar bertingkat memakai `listStyle=ordered|bullet` (bukan angka di string).
 6. Header/footer field PAGE.
@@ -338,6 +341,7 @@ table.data th.col-id, table.data td.col-id {
 ```bash
 officecli help docx htmlchunk
 officecli help docx toc
+officecli help docx section      # pageSetup=a4-moderate, margins=moderate, pageSize=a4
 officecli help docx paragraph   # listStyle, spaceBefore
 officecli help docx style       # spaceBefore pada Heading/Normal
 officecli add doc.docx /body --type toc --prop levels=1-3 --prop hyperlinks=true
