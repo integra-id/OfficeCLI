@@ -214,13 +214,16 @@ public partial class WordHandler
             var parent = chunk.Parent;
             if (parent == null) continue;
             var spacer = chunk.NextSibling();
+            // Tree ids restart at 1 for every chunk. Keep the numId map local
+            // so a later chunk does not join an earlier chunk's list.
+            var lists = new MaterializeListState();
 
             foreach (var block in job.Parsed.Blocks)
             {
-                var el = CreateFlowBlock(block, main, linkRels, ref droppedLinks, pictureIds, warnings);
+                var el = CreateFlowBlock(block, main, linkRels, ref droppedLinks, pictureIds, warnings, lists);
                 parent.InsertBefore(el, chunk);
-                if (el is Paragraph para && block is HtmlFlowParagraph flow && flow.ListKind != null)
-                    ApplyListStyle(para, flow.ListKind == "bullet" ? "bullet" : "ordered", flow.ListStart, flow.ListLevel);
+                if (el is Paragraph para && block is HtmlFlowParagraph flow)
+                    ApplyMaterializedList(para, flow, lists);
             }
 
             chunk.Remove();
@@ -244,6 +247,71 @@ public partial class WordHandler
             Unchanged = converted == 0,
             Warnings = warnings,
         };
+    }
+
+    /// <summary>
+    /// numIds minted while one chunk is converted. Keyed by the parser's list
+    /// tree id, which is only unique inside that chunk.
+    /// </summary>
+    sealed class MaterializeListState
+    {
+        public Dictionary<int, int> NumByTree { get; } = new();
+        /// <summary>Levels whose marker family has already been chosen.</summary>
+        public HashSet<(int NumId, int Ilvl)> Claimed { get; } = new();
+        /// <summary>Levels that already have a non-default start.</summary>
+        public HashSet<(int NumId, int Ilvl)> Starts { get; } = new();
+    }
+
+    /// <summary>
+    /// Bind a list paragraph to the numbering instance of its HTML tree.
+    /// The first item mints a definition through <see cref="ApplyListStyle"/>
+    /// (passing <c>start</c> so a following sibling list is not continued).
+    /// Every later item in that tree, including nested lists, reuses the
+    /// <c>numId</c> and sets <c>ilvl</c> from the depth. A nested <c>ul</c>
+    /// under an <c>ol</c> retargets that one level to the helper's bullet
+    /// cycle; the first item at a depth wins.
+    /// </summary>
+    void ApplyMaterializedList(Paragraph para, HtmlFlowParagraph flow, MaterializeListState lists)
+    {
+        if (flow.ListKind == null) return;
+        int ilvl = flow.ListLevel;
+        if (ilvl < 0) ilvl = 0;
+        else if (ilvl > 8) ilvl = 8;
+        bool bullet = flow.ListKind == "bullet";
+        int tree = flow.ListTree;
+
+        if (tree <= 0 || !lists.NumByTree.TryGetValue(tree, out var numId))
+        {
+            // start=1 still mints. ApplyListStyle continues an existing list
+            // only when start is omitted, which would merge two adjacent HTML
+            // lists that are not one tree.
+            int? start = flow.ListStart is int s && s > 0 ? s : 1;
+            ApplyListStyle(para, bullet ? "bullet" : "ordered", start, ilvl);
+            numId = para.ParagraphProperties?.NumberingProperties?.NumberingId?.Val?.Value ?? 0;
+            if (tree > 0 && numId > 0)
+                lists.NumByTree[tree] = numId;
+            if (numId > 0)
+            {
+                lists.Claimed.Add((numId, ilvl));
+                if (start is int minted && minted > 1) lists.Starts.Add((numId, ilvl));
+            }
+            return;
+        }
+
+        if (lists.Claimed.Add((numId, ilvl)))
+            EnsureListLevelKind(numId, ilvl, bullet);
+
+        var pPr = para.ParagraphProperties ?? para.PrependChild(new ParagraphProperties());
+        pPr.NumberingProperties = new NumberingProperties
+        {
+            NumberingId = new NumberingId { Val = numId },
+            NumberingLevelReference = new NumberingLevelReference { Val = ilvl },
+        };
+
+        // A nested <ol start="N"> is one level of the shared instance, not a
+        // new list. The first non-default start at that depth wins.
+        if (flow.ListStart is int nested && nested > 1 && lists.Starts.Add((numId, ilvl)))
+            SetListStartValue(para, nested);
     }
 
     void TidyCellAfterChunk(TableCell cell, OpenXmlElement? spacer)
@@ -283,11 +351,11 @@ public partial class WordHandler
         try { main.DeletePart(partId); } catch { /* already gone */ }
     }
 
-    OpenXmlElement CreateFlowBlock(HtmlFlowBlock block, MainDocumentPart main, Dictionary<string, string> linkRels, ref int droppedLinks, PictureIds pictureIds, List<string> warnings)
+    OpenXmlElement CreateFlowBlock(HtmlFlowBlock block, MainDocumentPart main, Dictionary<string, string> linkRels, ref int droppedLinks, PictureIds pictureIds, List<string> warnings, MaterializeListState lists)
     {
         return block switch
         {
-            HtmlFlowTable table => CreateTable(table, main, linkRels, ref droppedLinks, pictureIds, warnings),
+            HtmlFlowTable table => CreateTable(table, main, linkRels, ref droppedLinks, pictureIds, warnings, lists),
             HtmlFlowParagraph para => CreateParagraph(para, main, linkRels, ref droppedLinks, pictureIds, warnings),
             _ => new Paragraph(),
         };
@@ -483,7 +551,7 @@ public partial class WordHandler
         }
     }
 
-    Table CreateTable(HtmlFlowTable flow, MainDocumentPart main, Dictionary<string, string> linkRels, ref int droppedLinks, PictureIds pictureIds, List<string> warnings)
+    Table CreateTable(HtmlFlowTable flow, MainDocumentPart main, Dictionary<string, string> linkRels, ref int droppedLinks, PictureIds pictureIds, List<string> warnings, MaterializeListState lists)
     {
         var slots = new Dictionary<(int R, int C), CellSlot>();
         int cols = 0;
@@ -538,7 +606,7 @@ public partial class WordHandler
                 }
                 if (slot.OriginCol != c) continue;
                 tr.AppendChild(slot.IsOrigin
-                    ? FilledCell(slot, colW, main, linkRels, ref droppedLinks, pictureIds, warnings)
+                    ? FilledCell(slot, colW, main, linkRels, ref droppedLinks, pictureIds, warnings, lists)
                     : ContinueCell(slot, colW));
             }
             if (!tr.Elements<TableCell>().Any())
@@ -550,7 +618,7 @@ public partial class WordHandler
 
     sealed record CellSlot(HtmlFlowCell Cell, bool IsOrigin, int OriginCol, int ColSpan);
 
-    TableCell FilledCell(CellSlot slot, int colW, MainDocumentPart main, Dictionary<string, string> linkRels, ref int droppedLinks, PictureIds pictureIds, List<string> warnings)
+    TableCell FilledCell(CellSlot slot, int colW, MainDocumentPart main, Dictionary<string, string> linkRels, ref int droppedLinks, PictureIds pictureIds, List<string> warnings, MaterializeListState lists)
     {
         var tc = new TableCell();
         tc.AppendChild(CellProperties(slot.Cell.ColSpan, colW, slot.Cell.Fill,
@@ -558,10 +626,10 @@ public partial class WordHandler
             slot.Cell.Border, slot.Cell.Padding));
         foreach (var block in slot.Cell.Blocks)
         {
-            var el = CreateFlowBlock(block, main, linkRels, ref droppedLinks, pictureIds, warnings);
+            var el = CreateFlowBlock(block, main, linkRels, ref droppedLinks, pictureIds, warnings, lists);
             tc.AppendChild(el);
-            if (el is Paragraph para && block is HtmlFlowParagraph flow && flow.ListKind != null)
-                ApplyListStyle(para, flow.ListKind == "bullet" ? "bullet" : "ordered", flow.ListStart, flow.ListLevel);
+            if (el is Paragraph para && block is HtmlFlowParagraph flow)
+                ApplyMaterializedList(para, flow, lists);
         }
         if (tc.LastChild is not Paragraph)
         {

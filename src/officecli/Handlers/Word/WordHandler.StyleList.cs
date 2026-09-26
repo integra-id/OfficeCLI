@@ -1562,6 +1562,48 @@ public partial class WordHandler
         return null;
     }
 
+    /// <summary>
+    /// Marker <see cref="ApplyListStyle"/> writes at one depth. Ordered levels
+    /// cycle decimal, lower-letter, lower-roman. Bullet levels cycle •, ◦, ▪.
+    /// </summary>
+    private static (NumberFormatValues Format, string Text) ListLevelMarker(int level, bool bullet)
+    {
+        if (bullet)
+        {
+            string[] glyphs = ["\u2022", "\u25E6", "\u25AA"];
+            return (NumberFormatValues.Bullet, glyphs[level % glyphs.Length]);
+        }
+        var fmt = (level % 3) switch
+        {
+            0 => NumberFormatValues.Decimal,
+            1 => NumberFormatValues.LowerLetter,
+            _ => NumberFormatValues.LowerRoman,
+        };
+        return (fmt, $"%{level + 1}.");
+    }
+
+    /// <summary>
+    /// Point one level of an existing list at the bullet or ordered marker
+    /// <see cref="ListLevelMarker"/> would write for that depth. No-op when the
+    /// level is already that family. Does not mint a <c>numId</c>. Materialize
+    /// uses this so a nested <c>ul</c> under an <c>ol</c> (or the reverse) keeps
+    /// the helper's glyph cycle on the shared numbering instance.
+    /// </summary>
+    private void EnsureListLevelKind(int numId, int ilvl, bool isBullet)
+    {
+        if ((uint)ilvl > 8) return;
+        var level = GetAbstractLevel(numId, ilvl);
+        var fmt = level?.NumberingFormat;
+        var text = level?.LevelText;
+        if (fmt?.Val == null || !fmt.Val.HasValue || text == null) return;
+        bool currentlyBullet = fmt.Val.Value == NumberFormatValues.Bullet;
+        if (currentlyBullet == isBullet) return;
+        var (nextFmt, nextText) = ListLevelMarker(ilvl, isBullet);
+        fmt.Val = nextFmt;
+        text.Val = nextText;
+        _doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering?.Save();
+    }
+
     private void ApplyListStyle(Paragraph para, string listStyleValue, int? startValue = null, int? listLevel = null, OpenXmlElement? containerHint = null)
     {
         // Handle "none" — remove numbering
@@ -1611,8 +1653,6 @@ public partial class WordHandler
         var abstractNum = new AbstractNum { AbstractNumberId = maxAbstractId };
         abstractNum.AppendChild(new MultiLevelType { Val = MultiLevelValues.HybridMultilevel });
 
-        var bulletChars = new[] { "\u2022", "\u25E6", "\u25AA" }; // •, ◦, ▪
-
         for (int lvl = 0; lvl < 9; lvl++)
         {
             var level = new Level { LevelIndex = lvl };
@@ -1622,22 +1662,9 @@ public partial class WordHandler
             // `--prop level=1 start=5`) otherwise silently lost its start.
             level.AppendChild(new StartNumberingValue { Val = (lvl == (listLevel ?? 0) && startValue.HasValue) ? startValue.Value : 1 });
 
-            if (isBullet)
-            {
-                level.AppendChild(new NumberingFormat { Val = NumberFormatValues.Bullet });
-                level.AppendChild(new LevelText { Val = bulletChars[lvl % bulletChars.Length] });
-            }
-            else
-            {
-                var fmt = (lvl % 3) switch
-                {
-                    0 => NumberFormatValues.Decimal,
-                    1 => NumberFormatValues.LowerLetter,
-                    _ => NumberFormatValues.LowerRoman
-                };
-                level.AppendChild(new NumberingFormat { Val = fmt });
-                level.AppendChild(new LevelText { Val = $"%{lvl + 1}." });
-            }
+            var (fmt, marker) = ListLevelMarker(lvl, isBullet);
+            level.AppendChild(new NumberingFormat { Val = fmt });
+            level.AppendChild(new LevelText { Val = marker });
 
             level.AppendChild(new LevelJustification { Val = LevelJustificationValues.Left });
             level.AppendChild(new PreviousParagraphProperties(

@@ -115,6 +115,21 @@ A border on a wrapper is copied onto each paragraph inside it. It is not one rec
 
 These warnings do not trip `--strict`.
 
+### Nested lists
+
+A nested list (`ul` / `ol` inside an `li`, including one wrapped in a `div` or `blockquote`) is one Word numbering instance. Every item in that tree shares a single `w:numId`. `w:ilvl` is the depth: 0 on the outermost list, then 1, 2, and so on, clamped at 8.
+
+A list that is not inside that tree gets its own `numId`. That includes the next `ul` / `ol` in the body and any list in a table cell, even when the table itself sits inside an `li`. Two adjacent lists are not merged. A paragraph between a marker and a nested list does not split the instance.
+
+Markers still come from the existing list-style helper. An `ol` level cycles decimal, then lower-letter, then lower-roman. A `ul` level cycles •, ◦, ▪. The first item at a depth picks that level's marker; a later sublist at the same depth keeps it. The `type` attribute on `ol` is not read.
+
+Sharing one `numId` is what makes Word treat the tree as a single multilevel list: a later parent item stays on that instance instead of starting a new list at 1. Before this, each nested list minted its own `numId` at the right `ilvl`. The parent usually continued, but a nested list always restarted, and a paragraph or a change of list type between items could mint a new `numId` for the parent too.
+
+The definition is that helper's hybrid multilevel list (`w:multiLevelType` = `hybridMultilevel`) and does not write `w:lvlRestart`. Two restart edges remain:
+
+- ECMA-376 says a hybrid level with no `lvlRestart` does not restart. Word may keep a nested ordered counter going across parent items (a, b under item 1, then c under item 2). `officecli view` restarts a level whose `lvlRestart` is omitted whenever a shallower level advances, and it does not special-case hybrid lists, so the preview can show that counter starting again where Word continues.
+- `start` on the outermost list is that level's `w:start`. `start` on a nested list is written once, as `w:startOverride` on that `ilvl` of the shared instance. It applies to the whole level, not to one sublist. A second nested list at the same depth does not get its own start. `start="1"` adds no override.
+
 See `materialize-altchunk.sh`.
 
 Round-trip: `officecli dump` re-emits body-level HTML/RTF/text chunks as
