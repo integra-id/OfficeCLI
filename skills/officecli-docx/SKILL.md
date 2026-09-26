@@ -177,6 +177,16 @@ officecli set "$FILE" "/body/tbl[1]/tr[1]/tc[1]/p[1]/r[1]" --prop bold=true
 
 Row-level `set` supports `height`, `header`, and `c1 / c2 / … / cN` text shortcuts (`cN` generalises to any column count). Cell formatting (bold, fill, color) goes on the cell's paragraph / run — **not** row-level. For per-cell borders, set cell-level `border.*` on the `tc` (`--prop border.bottom="single;6;000000;0"`), or paragraph-level `pbdr.*` on the inner paragraph.
 
+**ID column.** A short code column (`T-01`, `NFR-01`, `FR-001`) should not wrap and should be only as wide as its longest value. Mark the whole column — do not set `noWrap` on every cell:
+
+```bash
+officecli set "$FILE" "/body/tbl[1]/col[1]" --prop idColumn=true
+officecli set "$FILE" "/body/tbl[1]" --prop idColumns=1,3
+officecli add "$FILE" /body --type table --prop idColumn=1 --prop data="ID,Requirement;T-01,Export the register;NFR-01,Response stays under one second"
+```
+
+`idColumn=true` writes `w:noWrap` and sets `w:gridCol` / `w:tcW` to `max(18mm, longest × 2.0mm + 8mm)`. `width=fit` sizes the column without changing wrap. See `help docx table-column`. Htmlchunk cells with class `col-id` or `white-space:nowrap` get the same treatment on `materialize`.
+
 **Horizontal rule = a paragraph bottom border, never a 1-row table.** A table-as-divider renders as an empty min-height box (worst in headers/footers). Use `pbdr.bottom` (`STYLE;SIZE;COLOR`) on the paragraph instead:
 
 ```bash

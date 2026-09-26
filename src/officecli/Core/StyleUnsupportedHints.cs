@@ -37,7 +37,7 @@ internal static class StyleUnsupportedHints
         // UNSUPPORTED by design — name the scoped alternative so an agent can
         // self-correct without consulting help.
         ["cantSplit"] = "row-scoped: add --type row --prop cantSplit=true, or set …/tbl[N]/tr[R] --prop cantSplit=true",
-        ["noWrap"] = "cell-scoped: add --type cell --prop noWrap=true, or set …/tbl[N]/tr[R]/tc[C] --prop noWrap=true",
+        ["noWrap"] = "cell-scoped, or the whole column: set …/tbl[N]/col[C] --prop noWrap=true (idColumn=true also fits the width to the longest line). Per cell: set …/tbl[N]/tr[R]/tc[C] --prop noWrap=true",
         ["hideMark"] = "cell-scoped: add --type cell --prop hideMark=true, or set …/tbl[N]/tr[R]/tc[C] --prop hideMark=true",
     };
 

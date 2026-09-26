@@ -2,26 +2,47 @@
   "$schema": "../_schema.json",
   "format": "docx",
   "element": "column",
-  "elementAliases": ["col"],
+  "elementAliases": ["col", "column"],
   "parent": "table",
   "operations": {
     "add": true,
-    "set": false,
-    "get": false,
+    "set": true,
+    "get": true,
     "query": false,
     "remove": true
   },
   "paths": {
     "positional": ["/body/tbl[N]/col[C]"]
   },
-  "note": "Virtual element — OOXML has no <w:col> child of <w:tbl>; the path is synthesized from <w:tblGrid>/<w:gridCol> + the per-row cell at column slot C. Same-table only for move/copy. Get/Set/Query at the column level are not supported (read width via /body/tbl[N] tblGrid or per-cell tcW). Insert is rejected when the column slot crosses a merged cell (gridSpan/vMerge) — unmerge first.",
+  "note": "Virtual element — OOXML has no <w:col> child of <w:tbl>; the path is synthesized from <w:tblGrid>/<w:gridCol> + the per-row cell at column slot C. Same-table only for move/copy. Set/Get accept idColumn, noWrap, and width (including width=fit). Query at the column level is not supported. Insert is rejected when the column slot crosses a merged cell (gridSpan/vMerge) — unmerge first. Marking an ID column skips a merged cell that only covers the slot and errors when no single-span cell starts in that column.",
   "properties": {
+    "idColumn": {
+      "type": "bool",
+      "description": "Mark this column as an ID column. true writes w:noWrap on every single-span cell that starts in the column and sets the column width (w:gridCol and those cells' w:tcW) to fit the longest line: max(18mm, longest × 2.0mm + 8mm). A Latin character counts as 1; a full-width character counts as about 1.8. Example: NFR-01 (6) → 1134 twips. false removes w:noWrap and leaves the width. An explicit width= on the same call is used instead of the fit. Other columns are not resized; a dxa table width shifts by the same delta. On a table path, pass the 1-based index instead (idColumn=1 or idColumns=1,3).",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": ["--prop idColumn=true"],
+      "readback": "true when every single-span cell has w:noWrap and the grid width still matches the fit; otherwise absent",
+      "enforcement": "report"
+    },
+    "noWrap": {
+      "type": "bool",
+      "aliases": ["nowrap"],
+      "description": "Write or remove w:noWrap on every single-span cell that starts in this column. Does not change the width. Prefer idColumn=true when the column should also fit the longest line.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": ["--prop noWrap=true"],
+      "readback": "true when every single-span cell in the column has w:noWrap; otherwise absent",
+      "enforcement": "report"
+    },
     "width": {
       "type": "length",
-      "description": "column width in twips (or any twips-parseable length).",
-      "add": true, "set": false, "get": false,
-      "examples": ["--prop width=2400", "--prop width=3cm"],
-      "readback": "n/a (column-level Get not implemented; inspect tblGrid)",
+      "description": "column width in twips (or any twips-parseable length). 'fit' or 'auto' sizes the column to the longest line using the same formula as idColumn, without changing wrap.",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop width=2400", "--prop width=3cm", "--prop width=fit"],
+      "readback": "Ndxa from w:gridCol",
       "enforcement": "report"
     },
     "text": {

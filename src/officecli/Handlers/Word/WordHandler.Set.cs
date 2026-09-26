@@ -40,6 +40,7 @@ public partial class WordHandler
         "outlinelevel", "contextualspacing", "numid", "numlevel", "bidi",
         // cell tcPr
         "valign", "verticalalignment", "width", "nowrap", "textdirection",
+        "idcolumn", "idcolumns",
         "gridspan", "vmerge", "hidemark", "fit",
         // row trPr
         "height", "rowheight", "cantsplit", "tblheader",
@@ -566,6 +567,12 @@ public partial class WordHandler
             @"^(?<parent>/body|/header\[\d+\]|/footer\[\d+\])?/(?:ole|object|embed)\[(?<idx>\d+)\]$",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         if (wordOleSetMatch.Success) return SetWordOlePath(wordOleSetMatch, properties);
+
+        // Virtual table column. OOXML has no <w:col>; add/remove/move already
+        // synthesize /tbl[N]/col[C]. Set lands here so idColumn / noWrap / width
+        // can target the whole column instead of one cell at a time.
+        if (TryResolveVirtualTableColumn(path, out var idColTable, out var idColIndex))
+            return SetTableColumn(idColTable, idColIndex, properties);
 
         var parts = ParsePath(path);
         var element = NavigateToElement(parts, out var ctx);

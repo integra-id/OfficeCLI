@@ -613,6 +613,19 @@ public partial class WordHandler
                 tr.AppendChild(EmptyCell(colW));
             table.AppendChild(tr);
         }
+
+        // class="col-id" or white-space:nowrap on a single-span cell marks
+        // that grid column: w:noWrap plus a width that fits the longest line.
+        // A colspan cell keeps noWrap on itself (set in CellProperties) and
+        // does not resize the whole column.
+        var idCols = new SortedSet<int>();
+        foreach (var slot in slots.Values)
+        {
+            if (slot.IsOrigin && slot.Cell.NoWrap && slot.Cell.ColSpan == 1)
+                idCols.Add(slot.OriginCol);
+        }
+        foreach (var origin in idCols)
+            ApplyColumnIdTreatment(table, origin + 1, new ColumnIdFlags(NoWrap: true, Fit: true, ExplicitTwips: null));
         return table;
     }
 
@@ -623,7 +636,7 @@ public partial class WordHandler
         var tc = new TableCell();
         tc.AppendChild(CellProperties(slot.Cell.ColSpan, colW, slot.Cell.Fill,
             slot.Cell.RowSpan > 1 ? MergedCellValues.Restart : null,
-            slot.Cell.Border, slot.Cell.Padding));
+            slot.Cell.Border, slot.Cell.Padding, slot.Cell.NoWrap));
         foreach (var block in slot.Cell.Blocks)
         {
             var el = CreateFlowBlock(block, main, linkRels, ref droppedLinks, pictureIds, warnings, lists);
@@ -662,18 +675,20 @@ public partial class WordHandler
     }
 
     static TableCellProperties CellProperties(int colSpan, int colW, string? fill, MergedCellValues? merge,
-        HtmlFlowBorder? border = null, HtmlFlowPadding? padding = null)
+        HtmlFlowBorder? border = null, HtmlFlowPadding? padding = null, bool noWrap = false)
     {
         var tcPr = new TableCellProperties();
         int span = Math.Max(1, colSpan);
         tcPr.TableCellWidth = new TableCellWidth { Width = (colW * span).ToString(), Type = TableWidthUnitValues.Dxa };
         if (span > 1) tcPr.GridSpan = new GridSpan { Val = span };
         if (merge != null) tcPr.VerticalMerge = new VerticalMerge { Val = merge.Value };
-        // CT_TcPr order: tcW, gridSpan, vMerge, tcBorders, shd, tcMar.
+        // CT_TcPr order: tcW, gridSpan, vMerge, tcBorders, shd, noWrap, tcMar.
         if (CellBordersFrom(border) is { } tcBorders)
             tcPr.TableCellBorders = tcBorders;
         if (!string.IsNullOrEmpty(fill))
             tcPr.Shading = new Shading { Val = ShadingPatternValues.Clear, Fill = fill };
+        if (noWrap)
+            tcPr.NoWrap = new NoWrap();
         if (CellMarginFrom(padding) is { } mar)
             tcPr.TableCellMargin = mar;
         return tcPr;

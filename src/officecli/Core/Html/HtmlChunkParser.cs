@@ -98,6 +98,11 @@ internal sealed class HtmlFlowCell
     public HtmlFlowBorder? Border { get; set; }
     /// <summary>CSS padding in twips. Emitted as <c>w:tcMar</c>, not as border space.</summary>
     public HtmlFlowPadding? Padding { get; set; }
+    /// <summary>
+    /// The cell is an ID column: class <c>col-id</c> or CSS <c>white-space:nowrap</c>.
+    /// Materialize writes <c>w:noWrap</c> and fits the column to its longest line.
+    /// </summary>
+    public bool NoWrap { get; set; }
 }
 
 /// <summary>
@@ -142,7 +147,10 @@ internal sealed class HtmlChunkParseResult
 /// tiff, emf, wmf — the picture pipeline's raster types, not svg or webp),
 /// and a small CSS subset (element, class, id, descendant and child
 /// combinators; the properties listed above plus text-align,
-/// background-color, margin, and borders). Remote and relative images, svg,
+/// background-color, margin, borders, and <c>white-space:nowrap</c> on a
+/// table cell). A cell with class <c>col-id</c> or <c>white-space:nowrap</c>
+/// marks that column as an ID column when the chunk is materialized
+/// (<c>w:noWrap</c> plus a width that fits the longest line). Remote and relative images, svg,
 /// webp, scripts, and layout CSS (float, flex, grid, media queries) are
 /// reported and not embedded. Border coverage is documented on
 /// <see cref="HtmlChunkParser"/>'s border helpers: physical shorthands and
@@ -812,6 +820,7 @@ internal static partial class HtmlChunkParser
                         Fill = OwnFill(cellNode),
                         Border = CellBorder(cellNode, tr, cellFmt.SizePt ?? 11),
                         Padding = CellPadding(cellNode, tr, cellFmt.SizePt ?? 11),
+                        NoWrap = CellRequestsNoWrap(cellNode),
                     };
                     EmitContainer(cellNode, cellFmt, cell.Blocks, ListContext.None, inPre: false);
                     if (cell.Blocks.Count == 0)
@@ -821,6 +830,17 @@ internal static partial class HtmlChunkParser
                 if (row.Cells.Count > 0) flow.Rows.Add(row);
             }
             return flow;
+        }
+
+        bool CellRequestsNoWrap(HtmlNode node)
+        {
+            foreach (var cls in node.Classes)
+                if (cls.Equals("col-id", StringComparison.OrdinalIgnoreCase))
+                    return true;
+            var whiteSpace = Own(node, "white-space");
+            if (string.IsNullOrEmpty(whiteSpace)) return false;
+            var token = whiteSpace.Trim().Split((char[])[' ', '\t'], 2, StringSplitOptions.RemoveEmptyEntries);
+            return token.Length > 0 && token[0].Equals("nowrap", StringComparison.OrdinalIgnoreCase);
         }
 
         static int ClampSpan(HtmlNode node, string attr)

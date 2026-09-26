@@ -959,6 +959,11 @@ public partial class WordHandler
             return styleNode;
         }
 
+        // Virtual /tbl[N]/col[C]. Same path as add/remove/set; there is no w:col
+        // element for NavigateToElement to return.
+        if (TryResolveVirtualTableColumn(path, out var idColTable, out var idColIndex))
+            return GetTableColumn(idColTable, idColIndex, path);
+
         var parts = ParsePath(path);
         var element = NavigateToElement(parts, out var ctx, out var resolvedPath);
         if (element == null)

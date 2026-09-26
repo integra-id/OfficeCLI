@@ -251,10 +251,23 @@ officecli add tables.docx /body --type table \
 | **Row props:** `header`, `height.exact` | 4 |
 | **Cell run formatting:** `font`, `italic`, `strike`, `underline`, `highlight` | 4 |
 | **Cell text direction:** `direction=rtl` (cell), `textDirection`, `nowrap` | 4 |
+| **ID column:** `idColumn` on `/tbl[N]/col[C]` or `idColumns` on the table (nowrap + fit) | — |
 | **Per-side padding:** `padding.top/bottom/left/right` | 4 |
 | **Cell width:** `width`, `skipGridSync`, `fitText` | 4 |
 | **Table RTL:** `direction=rtl` (table) | 6 |
 | **Inline data shorthand:** `data` | 7 |
+
+## ID column (nowrap + fit)
+
+Short codes such as `T-01`, `NFR-01`, and `FR-001` stay on one line when the column is marked as an ID column. The width follows the longest line (`max(18mm, longest × 2.0mm + 8mm)`).
+
+```bash
+officecli set doc.docx "/body/tbl[1]/col[1]" --prop idColumn=true
+officecli add doc.docx /body --type table --prop idColumn=1 \
+  --prop data="ID,Requirement;T-01,Export the register;NFR-01,Response stays under one second"
+```
+
+Smoke: `examples/word/table-id-column.sh`. Help: `officecli help docx table-column`.
 
 ## Inspect the Generated File
 

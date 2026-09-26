@@ -18,7 +18,7 @@
       "/body/tbl[N]"
     ]
   },
-  "note": "Tables default to Single/Size=4 borders on all sides. Length props use twips (raw int) or unit-qualified. Data can be seeded via 'data' (semicolon rows, comma cells) or per-cell 'r{R}c{C}' props. cantSplit / noWrap / hideMark are row/cell-scoped, not table props — see 'help docx table-row' / 'help docx table-cell'.",
+  "note": "Tables default to Single/Size=4 borders on all sides. Length props use twips (raw int) or unit-qualified. Data can be seeded via 'data' (semicolon rows, comma cells) or per-cell 'r{R}c{C}' props. cantSplit / noWrap / hideMark are row/cell-scoped, not table props — see 'help docx table-row' / 'help docx table-cell'. idColumn (alias idColumns) on the table is a 1-based column index or comma-separated list: it marks those columns as ID columns (w:noWrap plus a width that fits the longest line). The boolean form is the column path: set /body/tbl[N]/col[C] --prop idColumn=true. See 'help docx table-column'.",
   "children": [
     {
       "element": "row",
@@ -36,6 +36,17 @@
     "_shared/table.docx-pptx"
   ],
   "properties": {
+    "idColumn": {
+      "type": "string",
+      "description": "1-based column index, or a comma-separated list, to mark as ID columns: w:noWrap on each single-span cell in the column, and a width that fits the longest line (max(18mm, longest × 2.0mm + 8mm)). Alias: idColumns. Example values T-01, NFR-01, FR-001. A boolean is not accepted on the table — use set …/col[C] --prop idColumn=true for that form. See 'help docx table-column'.",
+      "aliases": ["idColumns"],
+      "add": true,
+      "set": true,
+      "get": false,
+      "examples": ["--prop idColumn=1", "--prop idColumns=1,3"],
+      "readback": "n/a (read the column: get …/tbl[N]/col[C])",
+      "enforcement": "report"
+    },
     "colWidths": {
       "type": "string",
       "description": "comma-separated per-column widths in twips. Aliases: colwidths.",
