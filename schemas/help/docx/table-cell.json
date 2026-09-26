@@ -80,6 +80,22 @@
       "readback": "unit-qualified, e.g. \"14pt\"",
       "enforcement": "report"
     },
+    "mono": {
+      "type": "bool",
+      "description": "GitHub-style monospace keyword chip on every run in the cell (alias: chip, monoChip): Consolas 9.5pt, run shading #F6F8FA, character border #D0D7DE. Does not set cell shading (w:tcPr/w:shd). To chip one keyword inside the cell, set the run or pass range= on the cell paragraph.",
+      "aliases": [
+        "chip",
+        "monoChip",
+        "monochip"
+      ],
+      "add": true,
+      "set": true,
+      "get": false,
+      "examples": [
+        "--prop text=\"NFR-01\" --prop mono=true"
+      ],
+      "enforcement": "report"
+    },
     "bold": {
       "type": "bool",
       "description": "bold applied to every run in the cell (set-only; apply after add).",

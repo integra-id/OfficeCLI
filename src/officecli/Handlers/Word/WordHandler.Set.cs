@@ -758,7 +758,8 @@ public partial class WordHandler
                   or "font.cs" or "font.complexscript" or "font.complex"
                   or "bold.cs" or "italic.cs" or "size.cs"
                   or "font.bold.cs" or "font.italic.cs" or "font.size.cs"
-                  or "boldcs" or "italiccs" or "sizecs":
+                  or "boldcs" or "italiccs" or "sizecs"
+                  or "mono" or "monochip" or "chip":
                     // Apply run-level formatting to all runs in the container
                     foreach (var run in container.Descendants<Run>())
                         ApplyRunFormatting(EnsureRunProperties(run), key, value);

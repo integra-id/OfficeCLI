@@ -1317,7 +1317,8 @@ public partial class WordHandler
             var rkl = rkey.ToLowerInvariant();
             if (rkl is not ("font" or "size" or "fontsize" or "bold" or "italic"
                 or "color" or "highlight" or "underline" or "underline.color"
-                or "underlinecolor" or "strike"))
+                or "underlinecolor" or "strike"
+                or "mono" or "monochip" or "chip"))
                 continue;
             // Register the key with the tracking comparer (foreach bypasses it).
             properties.ContainsKey(rkey);

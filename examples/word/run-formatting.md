@@ -108,6 +108,18 @@ officecli add run-formatting.docx /body --type paragraph \
 
 **Features:** `color` (6-digit hex, no `#`; e.g. `C00000`), `size` (half-point units; `16` = 8pt, or use `16pt`), `highlight` (yellow/green/cyan/magenta/blue/red/darkBlue/darkCyan/darkGreen/darkMagenta/darkRed/darkYellow/darkGray/lightGray/black/none)
 
+## Mono keyword chip
+
+One prop stamps the technical-document chip on a run: Consolas 9.5pt, shading `#F6F8FA`, character border `#D0D7DE`. It does not shade the paragraph or the table cell. Aliases: `chip`, `monoChip`.
+
+```bash
+officecli add doc.docx /body/p[1] --type run \
+  --prop text="docs/testing/README.md" --prop mono=true
+officecli set doc.docx /body/p[1] --prop range=4:26 --prop mono=true
+```
+
+**Features:** `mono` (true/false). `false` removes the border and shading, and Consolas 9.5pt only when they still match the chip. Smoke: `examples/word/mono-chip.sh`. Help: `officecli help docx run`.
+
 ## Per-Script Fonts
 
 Assign different typefaces to Latin and East-Asian script ranges within a single run.

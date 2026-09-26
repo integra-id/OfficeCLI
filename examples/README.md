@@ -7,7 +7,7 @@ Comprehensive examples demonstrating OfficeCLI capabilities for Word, Excel, and
 Every example below ships all four files — `.{md,sh,py,<ext>}` — even where the
 tree abbreviates. Only `ppt/templates/styles/*/build*.sh` are `.sh`-only.
 The fork smoke scripts `materialize-altchunk.sh`, `toc-refresh.sh`,
-`table-id-column.sh`, and `finalize.sh` are also `.sh`-only.
+`table-id-column.sh`, `finalize.sh`, and `mono-chip.sh` are also `.sh`-only.
 
 ```
 examples/
@@ -31,7 +31,8 @@ examples/
 │   ├── materialize-altchunk.sh              # smoke: headless materialize (borders, lists, --strict)
 │   ├── toc-refresh.sh                       # smoke: refresh --toc (PAGEREF stays 0)
 │   ├── table-id-column.sh                   # smoke: idColumn / idColumns / noWrap / width=fit
-│   └── finalize.sh                          # smoke: finalize (materialize, TOC, page setup, validate)
+│   ├── finalize.sh                          # smoke: finalize (materialize, TOC, page setup, validate)
+│   └── mono-chip.sh                         # smoke: native mono keyword chip (run / range / table cell)
 ├── excel/                                 # 📊 Excel examples — *.{md,sh,py,xlsx}
 │   ├── cell-formatting.{md,sh,py,xlsx}      # full cell property surface (fonts/fills/borders/numFmt/data)
 │   ├── conditional-formatting.{md,sh,py,xlsx}
@@ -111,6 +112,7 @@ bash textbox.sh              # Formatted text boxes
 bash numbering.sh   # List/numbering styles
 bash revisions.sh            # Tracked-change (revision) API — ins/del/format/move/cellChange
 bash html-chunk.sh           # HTML chunks (altChunk) — CSS, tables, lists, images, RTF/text, in-cell
+bash mono-chip.sh            # Native mono keyword chip (Consolas + #F6F8FA + border) — smoke
 ```
 
 The fork also ships CLI-only smoke scripts in this directory (no `.py` / prebuilt `.docx` twin). They expect a Release `dotnet build` and read `OFFICECLI` (default: `src/officecli/bin/Release/net10.0/officecli` or `…/linux-x64/officecli`). Run them from the repo root:
@@ -120,6 +122,7 @@ bash examples/word/materialize-altchunk.sh
 bash examples/word/toc-refresh.sh
 bash examples/word/table-id-column.sh
 bash examples/word/finalize.sh
+bash examples/word/mono-chip.sh
 ```
 
 **Excel (.xlsx):**

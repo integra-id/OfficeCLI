@@ -31,6 +31,7 @@ Assembly version on this branch: `1.0.152-htmlchunk.1` (`src/officecli/officecli
 | `pageSetup` / `pageSize` / `margins` | Named presets. `a4-moderate` (aliases `tech-doc`, `techdoc`) is A4 plus Word’s Moderate margins. |
 | ID columns | `idColumn` / `idColumns` / `noWrap` / `width=fit` on native tables. Htmlchunk cells with class `col-id` or `white-space: nowrap` get the same treatment when materialized. |
 | `finalize` | One headless pass: materialize, then TOC (if a TOC field exists), then `a4-moderate` only on sections with no `w:pgSz`, then schema validate. |
+| `mono` | GitHub-style keyword chip on a run (`--prop mono=true`, aliases `chip`, `monoChip`): Consolas 9.5pt, shading `#F6F8FA`, character border `#D0D7DE`. Does not shade the cell. |
 | Skills | `dokumen-teknis-officecli` and `rule-gaya-dokumen-teknis`, registered in `SkillMap`. |
 
 Excel, PowerPoint, and the rest of the Word DOM are the upstream commands documented further down.
@@ -67,6 +68,7 @@ officecli finalize --help
 officecli help docx htmlchunk
 officecli help docx section
 officecli help docx table-column
+officecli help docx run
 ```
 
 ### `htmlchunk` (altChunk)
@@ -183,6 +185,18 @@ Skip a step with `--no-materialize`, `--no-toc`, `--no-page-setup`, or `--no-val
 
 This command does not calculate real page numbers. Apply `pageSetup=a4-moderate` yourself while authoring if the section already has `w:pgSz`.
 
+### Mono keyword chip
+
+Word runs accept `--prop mono=true` (aliases `chip`, `monoChip`) for a GitHub-style keyword chip without an htmlchunk: Consolas 9.5pt, shading `#F6F8FA`, character border `#D0D7DE`. It stamps the run (or a `range=` slice, including inside a table cell) and does not shade the cell. Htmlchunk `code` / `span.mono` still materializes the font, size, and shading; this prop also writes the character border. `officecli help docx run`.
+
+```bash
+officecli add spec.docx /body/p[1] --type run \
+  --prop text="docs/testing/README.md" --prop mono=true
+officecli set spec.docx /body/p[1] --prop range=4:26 --prop mono=true
+```
+
+Smoke: [examples/word/mono-chip.sh](examples/word/mono-chip.sh).
+
 ### Skills
 
 Both skills ship in the repo and are registered in `SkillMap` (`src/officecli/Core/SkillInstaller.cs`). Names stay generic. `dokumen-teknis-officecli` is the build guide for a technical Word document (cover, TOC, htmlchunk, page setup, ID columns, `finalize`). `rule-gaya-dokumen-teknis` is the short style checklist that points at that guide.
@@ -199,7 +213,7 @@ officecli load_skill rule-gaya-dokumen-teknis
 
 ### Smoke examples
 
-These scripts live under [examples/word/](examples/word/). They are not invented wrappers. The four smoke scripts expect a Release build and default `OFFICECLI` to `src/officecli/bin/Release/net10.0/officecli` or `…/linux-x64/officecli`. Override with `OFFICECLI=/path/to/officecli`. Run them from the repo root.
+These scripts live under [examples/word/](examples/word/). They are not invented wrappers. The smoke scripts expect a Release build and default `OFFICECLI` to `src/officecli/bin/Release/net10.0/officecli` or `…/linux-x64/officecli`. Override with `OFFICECLI=/path/to/officecli`. Run them from the repo root.
 
 | Script | What it exercises |
 | --- | --- |
@@ -208,6 +222,7 @@ These scripts live under [examples/word/](examples/word/). They are not invented
 | [examples/word/toc-refresh.sh](examples/word/toc-refresh.sh) | `refresh --toc`. Asserts titles and hyperlinks, and that `PAGEREF` stays `0`. |
 | [examples/word/table-id-column.sh](examples/word/table-id-column.sh) | `idColumn`, `idColumns`, `noWrap`, `width=fit`. |
 | [examples/word/finalize.sh](examples/word/finalize.sh) | Default `finalize` order, skip flags, `--strict`, `--json`, and the “do not overwrite an existing `w:pgSz`” rule. |
+| [examples/word/mono-chip.sh](examples/word/mono-chip.sh) | `--prop mono=true` on a run, a character `range`, and a table-cell run. Asserts the cell itself is not shaded. |
 
 ```bash
 dotnet build -c Release src/officecli/officecli.csproj
@@ -215,6 +230,7 @@ bash examples/word/finalize.sh
 bash examples/word/materialize-altchunk.sh
 bash examples/word/toc-refresh.sh
 bash examples/word/table-id-column.sh
+bash examples/word/mono-chip.sh
 ( cd examples/word && bash html-chunk.sh )
 ```
 
@@ -850,8 +866,8 @@ The [Wiki](https://github.com/iOfficeAI/OfficeCLI/wiki) has detailed guides for 
 
 - **By format:** [Word](https://github.com/iOfficeAI/OfficeCLI/wiki/word-reference) | [Excel](https://github.com/iOfficeAI/OfficeCLI/wiki/excel-reference) | [PowerPoint](https://github.com/iOfficeAI/OfficeCLI/wiki/powerpoint-reference)
 - **Workflows:** [End-to-end examples](https://github.com/iOfficeAI/OfficeCLI/wiki/workflows) -- Word reports, Excel dashboards, PowerPoint decks, batch modifications, resident mode
-- **This fork:** [headless Word technical documents](#this-fork-headless-word-technical-documents) — `htmlchunk`, `materialize`, `refresh --toc`, page presets, ID columns, `finalize`, and the two in-repo skills
-- **Runnable examples:** [examples/](examples/) -- copy-paste scripts (.sh/.py) for Word, Excel, and PowerPoint, with output files included. Fork smoke scripts: [examples/word/](examples/word/) (`finalize.sh`, `materialize-altchunk.sh`, `toc-refresh.sh`, `table-id-column.sh`)
+- **This fork:** [headless Word technical documents](#this-fork-headless-word-technical-documents) — `htmlchunk`, `materialize`, `refresh --toc`, page presets, ID columns, `finalize`, the mono keyword chip, and the two in-repo skills
+- **Runnable examples:** [examples/](examples/) -- copy-paste scripts (.sh/.py) for Word, Excel, and PowerPoint, with output files included. Fork smoke scripts: [examples/word/](examples/word/) (`finalize.sh`, `materialize-altchunk.sh`, `toc-refresh.sh`, `table-id-column.sh`, `mono-chip.sh`)
 - **Troubleshooting:** [Common errors and solutions](https://github.com/iOfficeAI/OfficeCLI/wiki/troubleshooting)
 - **AI agent guide:** [Decision tree for navigating the wiki](https://github.com/iOfficeAI/OfficeCLI/wiki/agent-guide)
 

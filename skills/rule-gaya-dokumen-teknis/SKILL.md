@@ -17,7 +17,7 @@ Berlaku setiap kali membuat atau mengedit dokumen Word teknis project dengan Off
 6. **Numbering:** `listStyle=ordered|bullet` (atau numId) dengan indent Word; dilarang prefix `"1."` di plain text (contoh § pengguna utama).
 7. Callout & tabel & kode: htmlchunk + matchSrc, CSS token desain dokumen teknis (termasuk margin `p`/`h*`).
 8. Tanpa secret nyata; tanpa lorem/TODO di output final.
-9. **Mono keyword = chip:** hanya teks keyword (`code`/`span.mono`) di paragraf atau di dalam sel — chip `#F6F8FA` + border `#D0D7DE`; dilarang fill seluruh `td`; `pre.block` = full section.
+9. **Mono keyword = chip:** hanya teks keyword (`code`/`span.mono`, atau `--prop mono=true` pada run/`range`) di paragraf atau di dalam sel — chip `#F6F8FA` + border `#D0D7DE`; dilarang fill seluruh `td`; `pre.block` = full section.
 10. **Body justify:** Normal + paragraf htmlchunk `text-align: justify` / `align=justify`.
 11. **Kolom ID:** tabel native `set …/col[N] --prop idColumn=true` (nowrap + lebar dari ID terpanjang). Htmlchunk: `col-id` + `nowrap` — `materialize` menerapkan hal yang sama. Contoh: `T-01`, `NFR-01`, `FR-001`.
 12. Validasi outline + TOC + list numPr + sample mono chip + kolom ID satu baris + footer field sebelum menyerahkan file.

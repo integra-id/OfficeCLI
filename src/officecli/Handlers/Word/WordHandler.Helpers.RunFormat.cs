@@ -329,7 +329,8 @@ public partial class WordHandler
             or "outline" or "shadow" or "emboss" or "imprint"
             or "noproof" or "rtl"
             or "superscript" or "subscript"
-            or "charspacing" or "shading";
+            or "charspacing" or "shading"
+            or "mono" or "monochip" or "chip";
     }
 
     // CONSISTENCY(run-special-content): typography-only Format keys that
@@ -984,6 +985,16 @@ public partial class WordHandler
                 props.RemoveAllChildren<Spacing>();
                 InsertRunPropInSchemaOrder(props, new Spacing { Val = csTwips });
                 return true;
+            case "mono" or "monochip" or "chip":
+                // Native GitHub-style keyword chip. htmlchunk materialize
+                // already paints Consolas + 9.5pt + run shading (#F6F8FA) for
+                // <code> / span.mono. It does not emit a character border:
+                // CSS borders on inline elements are ignored (see
+                // HtmlChunkParser.Borders). w:bdr is the run-level equivalent
+                // of "1px solid #D0D7DE" (1px = 6 eighths of a point) with a
+                // 1pt inset. Never writes paragraph or cell shading.
+                ApplyMonoChip(props, value);
+                return true;
             case "shading" or "shd" or "fill":
                 // CONSISTENCY(shd-canonical-fill): `fill` is the canonical key
                 // Get emits for a solid run <w:shd>; accept it as a Set/Add alias
@@ -1221,6 +1232,50 @@ public partial class WordHandler
             default:
                 return false;
         }
+    }
+
+    // Skill tokens for the inline mono chip (dokumen teknis). Kept next to
+    // ApplyRunFormatting so add/set/range/find share one write.
+    private const string MonoChipFont = "Consolas";
+    private const string MonoChipSize = "9.5pt";
+    private const string MonoChipHalfPoints = "19";
+    private const string MonoChipFill = "F6F8FA";
+    private const string MonoChipBorderColor = "D0D7DE";
+    // single; eighths; color; space(pt). 6 eighths = 1px; space 1 ≈ the 1px inset.
+    private const string MonoChipBorder = "single;6;" + MonoChipBorderColor + ";1";
+
+    /// <summary>
+    /// Stamp or clear the mono keyword chip on a run-property container.
+    /// Truthy writes font, size, shading, and character border. Falsy removes
+    /// only the pieces that still match the chip, so a later font/size/fill/bdr
+    /// on the same run is left alone.
+    /// </summary>
+    private static void ApplyMonoChip(OpenXmlCompositeElement props, string value)
+    {
+        if (!IsTruthy(value))
+        {
+            var bdr = props.GetFirstChild<Border>();
+            if (bdr != null
+                && string.Equals(bdr.Color?.Value, MonoChipBorderColor, StringComparison.OrdinalIgnoreCase))
+                bdr.Remove();
+            var shd = props.GetFirstChild<Shading>();
+            if (shd != null
+                && string.Equals(shd.Fill?.Value, MonoChipFill, StringComparison.OrdinalIgnoreCase))
+                shd.Remove();
+            var fonts = props.GetFirstChild<RunFonts>();
+            if (fonts != null
+                && string.Equals(fonts.Ascii?.Value, MonoChipFont, StringComparison.OrdinalIgnoreCase))
+                ApplyRunFormatting(props, "font", "");
+            var size = props.GetFirstChild<FontSize>();
+            if (size?.Val?.Value == MonoChipHalfPoints)
+                size.Remove();
+            return;
+        }
+
+        ApplyRunFormatting(props, "font", MonoChipFont);
+        ApplyRunFormatting(props, "size", MonoChipSize);
+        ApplyRunFormatting(props, "fill", MonoChipFill);
+        ApplyRunFormatting(props, "bdr", MonoChipBorder);
     }
 
     /// <summary>
