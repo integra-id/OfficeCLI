@@ -313,6 +313,24 @@ table.data th.col-id, table.data td.col-id {
 }
 ```
 
+### Tabel native (bukan htmlchunk)
+
+Untuk tabel yang sudah ada, jangan set `noWrap` sel per sel. Tandai kolomnya:
+
+```bash
+officecli set doc.docx "/body/tbl[1]/col[1]" --prop idColumn=true
+```
+
+`idColumn=true` menulis `w:noWrap` pada setiap sel satu-kolom di kolom itu dan mengatur lebar (`w:gridCol` + `w:tcW`) dari baris terpanjang: `max(18mm, panjang × 2.0mm + 8mm)`. Beberapa kolom sekaligus, atau saat tabel dibuat:
+
+```bash
+officecli set doc.docx "/body/tbl[1]" --prop idColumns=1,3
+officecli add doc.docx /body --type table --prop idColumn=1 \
+  --prop data="ID,Requirement;T-01,The operator exports the register;NFR-01,Response stays under one second"
+```
+
+Htmlchunk tetap memakai `th.col-id` / `td.col-id` dan `white-space: nowrap`. `officecli materialize` menerapkan perlakuan kolom ID yang sama. Lihat `officecli help docx table-column`.
+
 ## RULES (wajib dipatuhi)
 
 1. **Satu sistem desain** — hanya token di atas.
@@ -332,7 +350,7 @@ table.data th.col-id, table.data td.col-id {
 15. **Reusable** — ganti konten + logo + DOC-ID, bukan gaya.
 16. **Mono keyword = chip** — hanya teks keyword (`code`/`span.mono`) yang ber-chip; jangan warnai seluruh sel tabel; full `pre.block` terpisah.
 17. **Body justify** — paragraf Normal rata kiri-kanan; heading/cover tidak ikut force-justify.
-18. **Kolom ID = nowrap + fit max** — `T-01`/`NFR-01`/`FR-001` dll. satu baris; lebar kolom dari ID terpanjang; dilarang wrap.
+18. **Kolom ID = nowrap + fit max** — `T-01`/`NFR-01`/`FR-001` dll. satu baris; lebar kolom dari ID terpanjang; dilarang wrap. Tabel native: `set …/col[N] --prop idColumn=true`.
 
 ## Adaptasi project lain
 

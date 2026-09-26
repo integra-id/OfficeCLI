@@ -291,6 +291,8 @@ public partial class WordHandler
         // below) — CT_TblPr has no slot for them, so they cannot be inserted
         // directly like the other tblPr children.
         int? rowBandSize = null, colBandSize = null;
+        // Applied after the grid and cells exist: idColumn=1 or idColumns=1,3.
+        string? idColumnSpec = null;
         // Set of keys the switch below consumes. Used to mark a key as
         // accessed via ContainsKey only when a case actually matched, so
         // genuine typos still fall through to the tracker's UnusedKeys.
@@ -305,6 +307,8 @@ public partial class WordHandler
             "overlap", "tblOverlap.val", "tblOverlap", "caption", "description",
             // BUG-DUMP-R36-2: band stripe widths.
             "rowbandsize", "colbandsize", "columnbandsize",
+            // ID columns: nowrap + fit-to-longest-line. Applied after cells exist.
+            "idcolumn", "idcolumns",
             // BUG-DUMP-R40-5: tblLook bitmask + decomposed facets. Without these
             // in the consumed set, the access-accounting never marks them and the
             // round-trip `tableLook=…` key surfaced as a spurious UNSUPPORTED
@@ -580,6 +584,9 @@ public partial class WordHandler
                 // `add table` carried rowBandSize/colBandSize but AddTable dropped
                 // them, flattening the visible striping. CONSISTENCY(add-set-symmetry).
                 // Collected here, written after the loop (mc guard below).
+                case "idcolumn" or "idcolumns":
+                    idColumnSpec = tv;
+                    break;
                 case "rowbandsize":
                     if (int.TryParse(tv, out var rbs)) rowBandSize = rbs;
                     break;
@@ -729,6 +736,9 @@ public partial class WordHandler
             }
             table.AppendChild(row);
         }
+
+        if (!string.IsNullOrEmpty(idColumnSpec))
+            ApplyTableIdColumnSpec(table, idColumnSpec);
 
         // Dotted-key fallback for tblPr-level attrs not modeled by the
         // hand-rolled blocks above (single-attr forms like tblpPr.* or
@@ -1123,10 +1133,12 @@ public partial class WordHandler
         if (insertIdx < existingGridCols.Count)
             GuardColumnSlotAddressable(targetTable, insertIdx, "insert column at index " + insertIdx + " of " + parentPath + ";");
 
-        // Width: explicit, or average of existing cols, or default 2400 twips
+        // Width: explicit, fit/idColumn (applied after the cells exist), or
+        // the average of the existing columns, or default 2400 twips.
         long defaultWidthTwips = 2400;
-        long newWidth = properties.TryGetValue("width", out var wVal)
-            ? ParseTwips(wVal)
+        var idFlags = ReadColumnIdFlags(properties);
+        long newWidth = idFlags.ExplicitTwips is int explicitTwips
+            ? explicitTwips
             : (existingGridCols.Count > 0
                 ? (long)existingGridCols.Average(gc => long.TryParse(gc.Width?.Value, out var w) ? w : defaultWidthTwips)
                 : defaultWidthTwips);
@@ -1189,6 +1201,8 @@ public partial class WordHandler
                 k.StartsWith("revision.", StringComparison.OrdinalIgnoreCase));
 
         var newColIdx = PathIndex.FromArrayIndex(grid.Elements<GridColumn>().ToList().IndexOf(newGridCol));
+        if (idFlags.NoWrap != null || idFlags.Fit)
+            ApplyColumnIdTreatment(targetTable, newColIdx, idFlags);
         return $"{parentPath}/col[{newColIdx}]";
     }
 

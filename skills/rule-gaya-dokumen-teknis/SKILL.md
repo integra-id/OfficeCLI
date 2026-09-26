@@ -19,7 +19,7 @@ Berlaku setiap kali membuat atau mengedit dokumen Word teknis project dengan Off
 8. Tanpa secret nyata; tanpa lorem/TODO di output final.
 9. **Mono keyword = chip:** hanya teks keyword (`code`/`span.mono`) di paragraf atau di dalam sel — chip `#F6F8FA` + border `#D0D7DE`; dilarang fill seluruh `td`; `pre.block` = full section.
 10. **Body justify:** Normal + paragraf htmlchunk `text-align: justify` / `align=justify`.
-11. **Kolom ID:** `col-id` + `nowrap` + lebar dari ID terpanjang (`T-01`, `NFR-01`, `FR-001`, …) agar tidak wrap.
+11. **Kolom ID:** tabel native `set …/col[N] --prop idColumn=true` (nowrap + lebar dari ID terpanjang). Htmlchunk: `col-id` + `nowrap` — `materialize` menerapkan hal yang sama. Contoh: `T-01`, `NFR-01`, `FR-001`.
 12. Validasi outline + TOC + list numPr + sample mono chip + kolom ID satu baris + footer field sebelum menyerahkan file.
 
 Detail lengkap dan perintah OfficeCLI ada di skill Dokumen teknis (OfficeCLI).

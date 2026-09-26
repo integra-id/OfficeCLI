@@ -3186,6 +3186,11 @@ public partial class WordHandler
                 case var k when k.StartsWith("border"):
                     ApplyTableBorders(tblPr, key, value);
                     break;
+                case "idcolumn" or "idcolumns":
+                    // 1-based index or comma-separated list. The boolean form
+                    // (idColumn=true) belongs on /tbl[N]/col[C].
+                    ApplyTableIdColumnSpec(tbl, value);
+                    break;
                 case "colwidths" or "colWidths":
                 {
                     var parts = value.Split(',');
@@ -3294,7 +3299,7 @@ public partial class WordHandler
                     }
                     if (!GenericXmlQuery.TryCreateTypedChild(tblPr, key, value))
                         unsupported.Add(unsupported.Count == 0
-                            ? $"{key} (valid table props: width, alignment, style, indent, cellspacing, layout, padding, border*, colWidths, firstRow, lastRow, firstCol, lastCol, bandedRows, bandedCols, caption, description)"
+                            ? $"{key} (valid table props: width, alignment, style, indent, cellspacing, layout, padding, border*, colWidths, idColumn, firstRow, lastRow, firstCol, lastCol, bandedRows, bandedCols, caption, description)"
                             : key);
                     break;
             }

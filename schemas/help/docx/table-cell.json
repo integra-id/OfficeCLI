@@ -303,7 +303,7 @@
     },
     "nowrap": {
       "type": "bool",
-      "description": "disable text wrapping inside the cell.",
+      "description": "disable text wrapping inside this cell (w:noWrap). To do that for a whole column and size it to the longest line, set …/tbl[N]/col[C] --prop idColumn=true (see 'help docx table-column').",
       "add": true,
       "set": true,
       "get": true,
