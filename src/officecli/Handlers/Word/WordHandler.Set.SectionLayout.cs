@@ -779,4 +779,99 @@ public partial class WordHandler
                 return false;
         }
     }
+
+    /// <summary>
+    /// Named page-setup presets (<c>pageSetup</c>, <c>pageSize</c>, <c>margins</c>).
+    /// Applied before explicit <c>pageWidth</c>/<c>margin*</c> writes so those
+    /// still override the preset in the same call. <c>pageSize=none</c> stays the
+    /// dump sentinel that removes <c>w:pgSz</c> — it is not a named size.
+    /// Order: combined pageSetup, then pageSize, then margins.
+    /// </summary>
+    private static void ApplyNamedPagePresets(SectionProperties sectPr, IDictionary<string, string> properties)
+    {
+        if (TryGetFirstProp(properties, out var setup, "pageSetup", "pagesetup"))
+        {
+            if (!WordPageDefaults.TryGetPageSetupPreset(setup, out var size, out var margins))
+                throw new ArgumentException(
+                    $"Unknown pageSetup preset: '{setup}'. Valid: {WordPageDefaults.PageSetupPresetList}.");
+            ApplyPageSizePreset(sectPr, size);
+            ApplyMarginPreset(sectPr, margins);
+        }
+
+        if (TryGetFirstProp(properties, out var pageSize, "pageSize", "pagesize"))
+        {
+            if (string.Equals(pageSize, "none", StringComparison.OrdinalIgnoreCase))
+                sectPr.RemoveAllChildren<PageSize>();
+            else if (WordPageDefaults.TryGetPageSizePreset(pageSize, out var size))
+                ApplyPageSizePreset(sectPr, size);
+            else
+                throw new ArgumentException(
+                    $"Unknown pageSize preset: '{pageSize}'. Valid: {WordPageDefaults.PageSizePresetList}, or none to remove w:pgSz. For a custom size use pageWidth and pageHeight.");
+        }
+
+        if (TryGetFirstProp(properties, out var marginName, "margins", "marginPreset", "marginpreset"))
+        {
+            if (!WordPageDefaults.TryGetMarginPreset(marginName, out var margins))
+                throw new ArgumentException(
+                    $"Unknown margins preset: '{marginName}'. Valid: {WordPageDefaults.MarginPresetList}. For custom edges use marginTop/marginBottom/marginLeft/marginRight.");
+            ApplyMarginPreset(sectPr, margins);
+        }
+    }
+
+    /// <summary>
+    /// True when the call carries a named preset (not the <c>pageSize=none</c> remove sentinel).
+    /// Used by <c>set /</c> so a none-only round-trip does not materialise a default sectPr.
+    /// </summary>
+    private static bool HasNamedPagePreset(IDictionary<string, string> properties)
+    {
+        if (properties.ContainsKey("pageSetup") || properties.ContainsKey("pagesetup"))
+            return true;
+        if (properties.ContainsKey("margins") || properties.ContainsKey("marginPreset")
+            || properties.ContainsKey("marginpreset"))
+            return true;
+        if ((properties.TryGetValue("pageSize", out var psz) || properties.TryGetValue("pagesize", out psz))
+            && !string.Equals(psz, "none", StringComparison.OrdinalIgnoreCase))
+            return true;
+        return false;
+    }
+
+    private static void ApplyPageSizePreset(SectionProperties sectPr, WordPageDefaults.PageSizePreset size)
+    {
+        var ps = EnsureSectPrPageSize(sectPr);
+        ps.Width = size.WidthTwips;
+        ps.Height = size.HeightTwips;
+        // Named sizes are portrait. A stale landscape flag would contradict
+        // w:w/w:h. An explicit orientation=landscape in the same call runs
+        // afterwards and swaps the edges.
+        ps.Orient = PageOrientationValues.Portrait;
+    }
+
+    private static void ApplyMarginPreset(SectionProperties sectPr, WordPageDefaults.MarginPreset margins)
+    {
+        var pm = EnsureSectPrPageMargin(sectPr);
+        pm.Top = margins.TopTwips;
+        pm.Bottom = margins.BottomTwips;
+        pm.Left = margins.LeftTwips;
+        pm.Right = margins.RightTwips;
+    }
+
+    // First present key wins; every present alias is looked up so Add's
+    // tracking dictionary marks each one consumed.
+    private static bool TryGetFirstProp(IDictionary<string, string> properties, out string value, params string[] keys)
+    {
+        value = "";
+        var found = false;
+        foreach (var key in keys)
+        {
+            if (properties.TryGetValue(key, out var v) && v != null)
+            {
+                if (!found)
+                {
+                    value = v;
+                    found = true;
+                }
+            }
+        }
+        return found;
+    }
 }

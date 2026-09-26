@@ -186,6 +186,10 @@ public partial class WordHandler
             Right = srcMargin?.Right?.Value ?? 1800
         });
 
+        // Named presets override the inherited geometry. Explicit pageWidth /
+        // margin* below still win when both are passed in the same add.
+        ApplyNamedPagePresets(sectPr, properties);
+
         // Allow per-section overrides
         bool explicitWidth = properties.TryGetValue("pagewidth", out var sw) || properties.TryGetValue("pageWidth", out sw) || properties.TryGetValue("width", out sw);
         if (explicitWidth)

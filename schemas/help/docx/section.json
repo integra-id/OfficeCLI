@@ -14,7 +14,7 @@
   "paths": {
     "positional": ["/section[N]", "/body/sectPr[N]"]
   },
-  "note": "Sections are section-break paragraphs carrying SectionProperties. Canonical length readback is cm (via FormatTwipsToCm). Lenient length input (twips int, or 2cm/0.5in/24pt via ParseTwips).",
+  "note": "Sections are section-break paragraphs carrying SectionProperties. Canonical length readback is cm (via FormatTwipsToCm). Lenient length input (twips int, or 2cm/0.5in/24pt via ParseTwips). Named presets: pageSetup=a4-moderate (alias tech-doc) sets A4 + Word Moderate margins; pageSize=a4 and margins=moderate do the same in two props. Explicit pageWidth/margin* in the same call override the preset.",
   "properties": {
     "type": {
       "type": "enum",
@@ -55,6 +55,34 @@
       "examples": ["--prop orientation=landscape"],
       "readback": "innerText of PageOrientationValues",
       "enforcement": "strict"
+    },
+    "pageSetup": {
+      "type": "enum",
+      "description": "Named page-setup preset (paper + body margins). a4-moderate and tech-doc (also techdoc) set A4 210×297mm (11906×16838 twips) and Word Moderate margins: top/bottom 2.54cm (1in / 25.4mm), left/right 1.905cm (0.75in / 19.05mm). Does not change header/footer distance. Explicit pageWidth/pageHeight/margin* or orientation in the same call override the preset. Input-only; get returns the expanded lengths in cm.",
+      "values": ["a4-moderate", "tech-doc"],
+      "add": true, "set": true, "get": false,
+      "examples": ["--prop pageSetup=a4-moderate", "officecli set file.docx /section[1] --prop pageSetup=tech-doc"],
+      "readback": "input-only (get returns pageWidth/pageHeight/margin* in cm)",
+      "enforcement": "report"
+    },
+    "pageSize": {
+      "type": "enum",
+      "description": "Named paper size, portrait. a4 = 210×297mm (11906×16838 twips). letter = 8.5×11in (12240×15840 twips). none removes w:pgSz (dump round-trip sentinel). Explicit pageWidth/pageHeight override the preset. orientation=landscape swaps the edges after the preset is applied.",
+      "values": ["a4", "letter", "none"],
+      "add": true, "set": true, "get": false,
+      "examples": ["--prop pageSize=a4", "--prop pageSize=letter"],
+      "readback": "input-only (get returns pageWidth/pageHeight in cm)",
+      "enforcement": "report"
+    },
+    "margins": {
+      "type": "enum",
+      "description": "Word margin-gallery preset for the four body edges. Header/footer distance is unchanged. moderate: top/bottom 2.54cm (1in / 25.4mm), left/right 1.905cm (0.75in / 19.05mm). normal: 1in all sides. narrow: 0.5in all sides. wide: top/bottom 1in, left/right 2in. Explicit marginTop/Bottom/Left/Right override the preset.",
+      "values": ["normal", "narrow", "moderate", "wide"],
+      "aliases": ["marginPreset"],
+      "add": true, "set": true, "get": false,
+      "examples": ["--prop margins=moderate"],
+      "readback": "input-only (get returns marginTop/Bottom/Left/Right in cm)",
+      "enforcement": "report"
     },
     "marginTop": {
       "type": "length",

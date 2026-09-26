@@ -141,7 +141,17 @@ officecli add file.docx /body/p[9] --type endnote --prop text="End reference."
 | Group | Keys | Visible in render? |
 |---|---|---|
 | Break type | `type` (`nextPage`/`continuous`/`evenPage`/`oddPage`/`nextColumn`) | Yes (page/column flow) |
-| Page setup | `pageWidth`, `pageHeight`, `orientation`, `marginTop/Bottom/Left/Right/Header/Footer/Gutter` | Yes (geometry) |
+| Page setup | `pageWidth`, `pageHeight`, `orientation`, `marginTop/Bottom/Left/Right/Header/Footer/Gutter`, `pageSetup`, `pageSize`, `margins` | Yes (geometry) |
+
+Named presets expand to the same twip geometry (explicit lengths in the same call still win):
+
+```bash
+officecli set file.docx /section[1] --prop pageSetup=a4-moderate
+# alias: --prop pageSetup=tech-doc
+# split: --prop pageSize=a4 --prop margins=moderate
+```
+
+`a4-moderate` is A4 (210×297mm) plus Word Moderate margins: top/bottom 2.54cm (1in), left/right 1.905cm (0.75in). `margins` also accepts `normal`, `narrow`, and `wide`. `pageSize` also accepts `letter`.
 | Columns | `columns`, `columnSpace` | Yes (multi-column flow) |
 | Vertical | `vAlign` (`top`/`center`/`both`/`bottom`) | Yes (block position) |
 | Line numbers | `lineNumbers`, `lineNumberCountBy`, `lineNumberDistance` | Yes (margin numbers) |

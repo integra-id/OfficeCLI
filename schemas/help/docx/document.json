@@ -520,6 +520,40 @@
       "readback": "n/a (set-only)",
       "enforcement": "report"
     },
+    "pageSetup": {
+      "type": "enum",
+      "description": "Named page-setup preset on the final section (same as /section[N]). a4-moderate and tech-doc set A4 (210×297mm) and Word Moderate margins: top/bottom 2.54cm (1in / 25.4mm), left/right 1.905cm (0.75in / 19.05mm). Does not change header/footer distance. Explicit pageWidth/margin* override the preset.",
+      "values": ["a4-moderate", "tech-doc"],
+      "add": false,
+      "set": true,
+      "get": false,
+      "examples": ["--prop pageSetup=a4-moderate", "--prop pageSetup=tech-doc"],
+      "readback": "input-only (get returns pageWidth/pageHeight/margin* in cm)",
+      "enforcement": "report"
+    },
+    "pageSize": {
+      "type": "enum",
+      "description": "Named paper size on the final section. a4 = 210×297mm (11906×16838 twips). letter = 8.5×11in. none removes w:pgSz (dump round-trip sentinel). Explicit pageWidth/pageHeight override the preset.",
+      "values": ["a4", "letter", "none"],
+      "add": false,
+      "set": true,
+      "get": false,
+      "examples": ["--prop pageSize=a4"],
+      "readback": "input-only (get returns pageWidth/pageHeight in cm)",
+      "enforcement": "report"
+    },
+    "margins": {
+      "type": "enum",
+      "description": "Word margin-gallery preset on the final section. moderate: top/bottom 2.54cm (1in / 25.4mm), left/right 1.905cm (0.75in / 19.05mm). Also normal (1in), narrow (0.5in), wide (left/right 2in). Alias key: marginPreset. Header/footer distance is unchanged. Explicit margin* override the preset.",
+      "values": ["normal", "narrow", "moderate", "wide"],
+      "aliases": ["marginPreset"],
+      "add": false,
+      "set": true,
+      "get": false,
+      "examples": ["--prop margins=moderate"],
+      "readback": "input-only (get returns marginTop/Bottom/Left/Right in cm)",
+      "enforcement": "report"
+    },
     "pageWidth": {
       "type": "length",
       "add": false,
