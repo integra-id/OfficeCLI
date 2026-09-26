@@ -1,17 +1,17 @@
 ---
-name: Dokumen teknis Integra (OfficeCLI)
+name: Dokumen teknis (OfficeCLI)
 description: >-
   Pakai saat membuat atau mengedit dokumen Word teknis project (panduan, spek,
   runbook, BA) agar layout tipografi warna tabel callout kode header-footer
-  spasi numbering TOC mengikuti desain Integra memakai OfficeCLI htmlchunk.
+  spasi numbering TOC mengikuti desain dokumen teknis memakai OfficeCLI htmlchunk.
 ---
-# Dokumen teknis Integra (OfficeCLI)
+# Dokumen teknis (OfficeCLI)
 
-Buat dokumen Word teknis project (panduan integrasi, spesifikasi, runbook, BA, desain) yang **layout, tipografi, warna, spasi, numbering, TOC, tabel, callout, kode, header/footer-nya mengikuti desain sistem dokumen contoh Integra** — memakai **OfficeCLI** (`officecli`), terutama `htmlchunk`.
+Buat dokumen Word teknis project (panduan integrasi, spesifikasi, runbook, BA, desain) yang **layout, tipografi, warna, spasi, numbering, TOC, tabel, callout, kode, header/footer-nya mengikuti desain dokumen teknis** — memakai **OfficeCLI** (`officecli`), terutama `htmlchunk`.
 
 ## Kapan dipakai
 
-- User minta buat/update dokumen teknis `.docx` bergaya panduan Integra / klien / project sejenis
+- User minta buat/update dokumen teknis `.docx` bergaya desain dokumen teknis / klien / project sejenis
 - Perlu cover + meta dokumen + riwayat versi + TOC terhubung + bab bernomor + tabel + callout + blok kode
 - Repo/tooling: `integra-id/OfficeCLI` (fitur `htmlchunk`) atau binary `officecli` yang mendukung `--type htmlchunk`
 
@@ -78,7 +78,7 @@ Untuk paragraf yang di-set properti run secara eksplisit, tambahkan juga `--prop
 
 Urutan baku — sesuaikan judul/isi project, **jangan hilangkan blok kecuali user bilang**:
 
-1. **Cover** (section `titlePg`): logo kiri (klien) + logo kanan (Integra), eyebrow organisasi, judul (baris netral + baris aksen teal), subtitle audiens, paragraf ringkas tujuan, catatan versi singkat, tabel meta (Nomor dokumen, Versi, Tanggal, Klasifikasi, Disusun oleh, Ditujukan kepada)
+1. **Cover** (section `titlePg`): logo kiri (klien) + logo kanan (vendor/implementor), eyebrow organisasi, judul (baris netral + baris aksen teal), subtitle audiens, paragraf ringkas tujuan, catatan versi singkat, tabel meta (Nomor dokumen, Versi, Tanggal, Klasifikasi, Disusun oleh, Ditujukan kepada)
 2. **Riwayat Versi** — tabel: Versi | Tanggal | Ringkasan perubahan | Penyusun
 3. **Ruang Lingkup** — apa yang masuk / tidak masuk
 4. **Dokumen Terkait** — tabel referensi
@@ -357,4 +357,4 @@ Contoh fork: `examples/word/html-chunk.sh` di `integra-id/OfficeCLI` branch fitu
 - Consolas/mono polos tanpa background+border di tengah paragraf/tabel
 - Margin selain Moderate (atau yang diminta user) / page size non-A4 tanpa permintaan
 - Kolom ID yang wrap (T-01 / NFR-01 turun baris) karena lebar kolom tidak di-fit
-- Paragraf body left-only padahal design Integra default justify
+- Paragraf body left-only padahal desain dokumen teknis default justify
