@@ -1155,6 +1155,11 @@ public class ResidentServer : IDisposable
                 ExecuteRefresh(request);
                 NotifyWatchFullRefresh();
                 break;
+            case "materialize":
+                PromoteToEditable();
+                ExecuteMaterialize(request);
+                NotifyWatchFullRefresh();
+                break;
             case "raw":
                 ExecuteRaw(request);
                 break;
@@ -2424,6 +2429,24 @@ public class ResidentServer : IDisposable
         var props = req.GetProps();
         var resultPath = _handler.Move(path, to, BuildInsertPosition(req), props.Count > 0 ? props : null);
         Console.WriteLine($"Moved to {resultPath}");
+    }
+
+    private void ExecuteMaterialize(ResidentRequest req)
+    {
+        if (_handler is not OfficeCli.Handlers.WordHandler word)
+            throw new OfficeCli.Core.CliException("materialize currently only supports .docx/.docm files.")
+            { Code = "unsupported_type" };
+        var strict = req.GetArg("strict", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
+        var report = word.MaterializeAltChunks(strict);
+        if (report.Refused)
+            throw new OfficeCli.Core.CliException(report.Summary + (report.Warnings.Count > 0 ? " " + string.Join("; ", report.Warnings) : ""))
+            {
+                Code = "altchunk_skipped",
+                Help = "officecli materialize --help",
+            };
+        if (report.Converted > 0)
+            word.Save();
+        CommandBuilder.WriteMaterializeReport(report, req.Json);
     }
 
     private void ExecuteRefresh(ResidentRequest req)

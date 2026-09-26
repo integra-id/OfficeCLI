@@ -27,6 +27,9 @@ public partial class WordHandler
     /// OfficeCLI having to translate it. Unlike `markdown` this is NOT an
     /// expansion: the chunk stays a single <c>altChunk</c> node until Word
     /// converts it (the HTML preview shows it as escaped source).
+    /// <c>officecli materialize</c> can replace HTML/XHTML/plain-text chunks
+    /// with native body content without Word; that converter is a subset
+    /// (see <see cref="MaterializeAltChunks"/>).
     ///
     /// Input: inline via canonical <c>html</c> (aliases: content, text) or a
     /// file via <c>src</c> (alias: path). The payload format is inferred from
