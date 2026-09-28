@@ -19,7 +19,7 @@ Open-source. Single binary. No Office installation. No dependencies. Works every
 
 Upstream OfficeCLI already creates and edits `.docx` / `.xlsx` / `.pptx` with no Office install. This fork’s branch adds the pieces a technical-document skill needs: embed HTML as `w:altChunk`, turn supported chunks into native OOXML without Word, rebuild TOC entries, apply an A4 + Moderate page preset, and fit ID columns so short codes stay on one line.
 
-Assembly version on this branch: `1.0.152-htmlchunk.1` (`src/officecli/officecli.csproj`). The guide below is the upstream README. Fork-only behavior is this section, [examples/word/html-chunk.md](examples/word/html-chunk.md), and the skills under `skills/`.
+Assembly version on this branch: `1.0.152-htmlchunk.2` (`src/officecli/officecli.csproj`). The guide below is the upstream README. Fork-only behavior is this section, [examples/word/html-chunk.md](examples/word/html-chunk.md), and the skills under `skills/`.
 
 ### What this fork adds
 
@@ -103,7 +103,7 @@ officecli materialize spec.docx --json
 
 Headless. Does not run Microsoft Word. Converts HTML, XHTML, and plain text into native paragraphs, lists, tables (including colspan / rowspan), hyperlinks, and inline pictures. Formatting is written on the runs; `h1`–`h6` also reference Heading styles. RTF and MHT chunks are left in place. Scripts are dropped. Float, flex, grid, and media queries are not reproduced.
 
-Pictures: a data-URI whose type the picture pipeline already accepts (`png`, `jpeg`, `gif`, `bmp`, `tiff`, `emf`, `wmf`) becomes an inline `w:drawing`. The `alt` attribute is the description. `webp`, `svg`, video, and iframe are not embedded. `http(s)` URLs are not downloaded and relative `src` values are not resolved; those stay as italic `[image: …]` text and the rest of the chunk is still converted. A data URI that fails to decode is the same kind of warning. Picture warnings do not trip `--strict`. `officecli materialize --help` is the converter contract. The `htmlchunk` element note (`officecli help docx htmlchunk`) still says images are not embedded; that sentence is behind the converter.
+Pictures: a data-URI whose type the picture pipeline already accepts (`png`, `jpeg`, `gif`, `bmp`, `tiff`, `emf`, `wmf`) becomes an inline `w:drawing`. The `alt` attribute is the description. `webp`, `svg`, video, and iframe are not embedded. `http(s)` URLs are not downloaded and relative `src` values are not resolved; those stay as italic `[image: …]` text and the rest of the chunk is still converted. A data URI that fails to decode is the same kind of warning. Picture warnings do not trip `--strict`. `officecli materialize --help` is the converter contract.
 
 `--strict` leaves the file unchanged and exits 1 when any whole chunk cannot be converted (RTF, MHT, a missing part, or a chunk outside the body). Without `--strict`, convertible chunks are still written and the rest stay.
 
