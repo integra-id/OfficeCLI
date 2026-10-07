@@ -974,8 +974,13 @@ public partial class WordHandler
 
             // ¶ mark del — pPr/rPr/<w:del/>
             var pPr = paraEl.ParagraphProperties ?? paraEl.PrependChild(new ParagraphProperties());
-            var pPrRpr = pPr.ParagraphMarkRunProperties
-                       ?? pPr.AppendChild(new ParagraphMarkRunProperties());
+            var pPrRpr = pPr.ParagraphMarkRunProperties;
+            if (pPrRpr == null)
+            {
+                // CT_PPr keeps rPr before sectPr/pPrChange — place, don't append.
+                pPrRpr = pPr.AppendChild(new ParagraphMarkRunProperties());
+                OfficeCli.Core.SchemaOrder.Place(pPr, pPrRpr);
+            }
             // Schema: paragraph-mark deletion marker is a bare <w:del>
             // (no inner properties), child of w:rPr inside w:pPr.
             var paraDel = new Deleted
@@ -984,7 +989,13 @@ public partial class WordHandler
                 Date = tcDate,
                 Id = !string.IsNullOrEmpty(tcExplicitId) ? tcExplicitId : GenerateRevisionId(),
             };
+            // CT_ParaRPr puts ins/del/moveFrom/moveTo FIRST, before rStyle/
+            // rFonts/…; appending after the mark's existing formatting wrote a
+            // schema-invalid rPr whenever the ¶ mark already carried run
+            // properties (most Word-authored paragraphs). The resident path
+            // only came out right because a later save pass reordered it (#450).
             pPrRpr.AppendChild(paraDel);
+            OfficeCli.Core.SchemaOrder.Place(pPrRpr, paraDel);
 
             // Wrap every existing Run child in its own w:del with w:t → w:delText.
             // Each run wrapper gets its own unique id (still distinct from the

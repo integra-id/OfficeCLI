@@ -281,7 +281,7 @@ static partial class CommandBuilder
                 // skipped on purpose — '-' is not a path.)
                 if (inputFile.Name == "-")
                 {
-                    jsonText = StripBom(StdIn.ReadToEnd());
+                    jsonText = ReadStdInPayload("batch", BatchPayloadFlags);
                 }
                 else
                 {
@@ -300,7 +300,7 @@ static partial class CommandBuilder
                 // System.Text.Json.Parse with "'﻿' is an invalid start of
                 // a value" while `batch --input utf8bom.json` succeeded —
                 // splitting the contract on the input source.
-                jsonText = StripBom(StdIn.ReadToEnd());
+                jsonText = ReadStdInPayload("batch", BatchPayloadFlags);
             }
 
             // Pre-validate: check for unknown JSON fields before deserializing
@@ -737,6 +737,25 @@ static partial class CommandBuilder
             : Console.In);
 
     internal static TextReader StdIn => LazyStdIn.Value;
+
+    /// <summary>
+    /// Read a whole piped payload (batch JSON, import CSV/TSV) from stdin.
+    ///
+    /// Under `officecli mcp` stdin is the JSON-RPC channel, which the client
+    /// keeps open for the whole session: ReadToEnd would wait for an EOF that
+    /// never comes, and because commands run on the server's request loop,
+    /// every later request would go unanswered. Refuse instead, naming the
+    /// flag that carries the payload (<paramref name="useInstead"/>).
+    /// </summary>
+    private const string BatchPayloadFlags = "Pass the JSON array via --commands '<json>' or --input <file>.";
+
+    internal static string ReadStdInPayload(string verb, string useInstead)
+    {
+        if (McpServer.InMcpMode)
+            throw new ArgumentException(
+                $"{verb}: cannot read from stdin under MCP (stdin is the JSON-RPC channel). {useInstead}");
+        return StripBom(StdIn.ReadToEnd());
+    }
 
     /// <summary>
     /// The atomic temp name adds ~45 bytes of affixes around the document's

@@ -78,6 +78,17 @@ internal static class WordHtmlRefresh
             catch { /* fall through to the headless path */ }
         }
 
+        // A refresh that reports failure must leave the document exactly as it
+        // was opened (upstream 1.0.155 contract; the same one ElementRollback
+        // holds for a failed element-level Set/Add). Keep the bytes and put
+        // them back on every failure exit below.
+        var original = TryReadAllBytes(docx);
+        RefreshResult FailAndRestore(string message)
+        {
+            RestoreOriginal(docx, original);
+            return Fail(message);
+        }
+
         WordTocBuilder.TocRebuildResult rebuilt;
         try
         {
@@ -88,13 +99,13 @@ internal static class WordHtmlRefresh
         }
         catch
         {
-            return Fail("refresh failed (could not rebuild TOC entries).");
+            return FailAndRestore("refresh failed (could not rebuild TOC entries).");
         }
 
         if (tocOnly)
         {
             if (rebuilt.TocFields > 0 && rebuilt.Skipped == rebuilt.TocFields)
-                return Fail("refresh --toc found TOC fields but could not rebuild them (the field result is not a contiguous block of paragraphs).");
+                return FailAndRestore("refresh --toc found TOC fields but could not rebuild them (the field result is not a contiguous block of paragraphs).");
             return EntriesResult(docx, rebuilt, tocOnly: true);
         }
 
@@ -102,7 +113,13 @@ internal static class WordHtmlRefresh
         // how many PAGEREF caches were rewritten from the anchor→page map.
         int updated = -1;
         try { updated = TryApplyHtmlPageNumbers(docx); }
-        catch { updated = -1; }
+        catch
+        {
+            updated = -1;
+            // A throw part-way through the page-number write can leave a torn
+            // package; fall back to the entry rebuild we already saved.
+            if (!PackageOpens(docx)) RestoreOriginal(docx, original);
+        }
 
         if (updated > 0)
         {
@@ -128,7 +145,7 @@ internal static class WordHtmlRefresh
         if (rebuilt.TocFields > rebuilt.Skipped)
             return EntriesResult(docx, rebuilt, tocOnly: false);
 
-        return Fail("refresh failed (Word backend unavailable and HTML fallback failed — no headless browser found).");
+        return FailAndRestore("refresh failed (Word backend unavailable and HTML fallback failed — no headless browser found).");
     }
 
     static RefreshResult EntriesResult(string docx, WordTocBuilder.TocRebuildResult rebuilt, bool tocOnly)
@@ -149,6 +166,27 @@ internal static class WordHtmlRefresh
         var skipped = rebuilt.Skipped > 0 ? $" {rebuilt.Skipped} TOC field(s) left unchanged." : "";
         var msg = $"Rebuilt TOC entries: {docx} (backend: toc-entries, fields: {rebuilt.TocFields - rebuilt.Skipped}, entries: {rebuilt.Entries}). {why}{placeholder}{skipped}";
         return new RefreshResult(true, "toc-entries", rebuilt.TocFields - rebuilt.Skipped, rebuilt.Entries, pages, msg);
+    }
+
+    /// <summary>Bytes of the package as opened, or null when they could not be
+    /// read — there is then nothing to put back.</summary>
+    static byte[]? TryReadAllBytes(string docx)
+    {
+        try { return File.ReadAllBytes(docx); } catch { return null; }
+    }
+
+    /// <summary>Put the snapshot back after a failed refresh. Best-effort: a
+    /// restore that fails must not turn "refresh failed" into a thrown error.</summary>
+    static void RestoreOriginal(string docx, byte[]? original)
+    {
+        if (original == null) return;
+        try { File.WriteAllBytes(docx, original); } catch { }
+    }
+
+    static bool PackageOpens(string docx)
+    {
+        try { using var d = WordprocessingDocument.Open(docx, false); return d.MainDocumentPart?.Document != null; }
+        catch { return false; }
     }
 
     static RefreshResult Fail(string message)

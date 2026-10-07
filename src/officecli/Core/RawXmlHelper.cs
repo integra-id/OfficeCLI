@@ -710,6 +710,12 @@ internal static class RawXmlHelper
         // Drop known SDK-validator false positives on xlsx <font> child order —
         // see IsBenignFontChildOrderError.
         errors.RemoveAll(IsBenignFontChildOrderError);
+        // SDK 3.4.1's compiled particle for w:style/w:rPr (StyleRunProperties)
+        // is a truncated CT_RPr — it lacks rStyle, highlight, rtl, cs and oMath
+        // that the schema (and Word) allow there — so a correctly ordered
+        // <w:highlight/> in a style's rPr is reported as an invalid child. Word
+        // opens such files without complaint (issue #434).
+        errors.RemoveAll(IsBenignStyleRunPropertyError);
         return errors;
     }
 
@@ -734,6 +740,21 @@ internal static class RawXmlHelper
     /// styles part + the offending element is a <c>font</c> + the "unexpected child"
     /// really is one of CT_Font's own children, so a foreign element still surfaces.
     /// </summary>
+    private static readonly HashSet<string> StyleRunPropertyChildrenMissingFromSdkParticle =
+        new(StringComparer.Ordinal) { "rStyle", "highlight", "rtl", "cs", "oMath" };
+
+    private static bool IsBenignStyleRunPropertyError(ValidationError e)
+    {
+        var path = e.Path ?? "";
+        if (!path.Contains("/w:style[", StringComparison.Ordinal) || !path.EndsWith("]", StringComparison.Ordinal)
+            || !System.Text.RegularExpressions.Regex.IsMatch(path, @"/w:rPr\[\d+\]$"))
+            return false;
+        var d = e.Description ?? "";
+        if (!d.Contains("invalid child element", StringComparison.OrdinalIgnoreCase)) return false;
+        var m = System.Text.RegularExpressions.Regex.Match(d, @"wordprocessingml/2006/main:(\w+)'");
+        return m.Success && StyleRunPropertyChildrenMissingFromSdkParticle.Contains(m.Groups[1].Value);
+    }
+
     private static bool IsBenignFontChildOrderError(ValidationError e)
     {
         if (!(e.Part ?? "").EndsWith("/styles.xml", StringComparison.OrdinalIgnoreCase))

@@ -185,7 +185,7 @@ public partial class ExcelHandler
             {
                 foreach (var cell in contentCells)
                 {
-                    rowNode.Children.Add(CellToNode(sheetName, cell, worksheetPart, eval));
+                    rowNode.Children.Add(CellToNode(sheetName, cell, worksheetPart, eval, depth - 1));
                 }
             }
 
@@ -292,7 +292,7 @@ public partial class ExcelHandler
         return false;
     }
 
-    private DocumentNode CellToNode(string sheetName, Cell cell, WorksheetPart? part = null, Core.FormulaEvaluator? evaluator = null)
+    private DocumentNode CellToNode(string sheetName, Cell cell, WorksheetPart? part = null, Core.FormulaEvaluator? evaluator = null, int depth = 1)
     {
         var cellRef = cell.CellReference?.Value ?? "?";
         // Shared-formula children hold an empty <f/>; ResolveText expands them
@@ -449,8 +449,7 @@ public partial class ExcelHandler
             && int.TryParse(cell.CellValue?.Text, out var phSstIdx))
         {
             var phSst = _doc.WorkbookPart?.GetPartsOfType<SharedStringTablePart>().FirstOrDefault();
-            var phSsi = phSst?.SharedStringTable?
-                .Elements<SharedStringItem>().ElementAtOrDefault(phSstIdx);
+            var phSsi = SharedStringAt(phSst?.SharedStringTable, phSstIdx);
             var firstRPh = phSsi?.Elements<PhoneticRun>().FirstOrDefault();
             if (firstRPh?.Text?.Text is { Length: > 0 } phText)
                 node.Format["phonetic"] = phText;
@@ -814,7 +813,7 @@ public partial class ExcelHandler
             int.TryParse(cell.CellValue?.Text, out var sstIdx2))
         {
             var sst2 = _doc.WorkbookPart?.GetPartsOfType<SharedStringTablePart>().FirstOrDefault();
-            var ssi2 = sst2?.SharedStringTable?.Elements<SharedStringItem>().ElementAtOrDefault(sstIdx2);
+            var ssi2 = SharedStringAt(sst2?.SharedStringTable, sstIdx2);
             if (ssi2 != null)
             {
                 var runs = ssi2.Elements<Run>().ToList();
@@ -823,7 +822,7 @@ public partial class ExcelHandler
                     node.Format["richtext"] = true;
                     node.ChildCount = runs.Count;
                     int runI = 1;
-                    foreach (var run in runs)
+                    foreach (var run in depth > 0 ? runs : Enumerable.Empty<Run>())
                     {
                         node.Children.Add(RunToNode(run, $"/{sheetName}/{cellRef}/run[{runI}]"));
                         runI++;

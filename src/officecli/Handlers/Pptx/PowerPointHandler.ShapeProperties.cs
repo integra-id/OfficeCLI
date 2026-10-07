@@ -975,7 +975,10 @@ public partial class PowerPointHandler
                     spPr.RemoveAllChildren<Drawing.CustomGeometry>();
                     var existingGeom = spPr.GetFirstChild<Drawing.PresetGeometry>();
                     if (existingGeom != null)
+                    {
                         existingGeom.Preset = ParsePresetShape(value);
+                        ReconcileAdjustGuides(existingGeom);
+                    }
                     else
                         {
                             var newGeom = EnsurePresetGeometry(spPr);
@@ -1037,7 +1040,10 @@ public partial class PowerPointHandler
                         spPr.RemoveAllChildren<Drawing.CustomGeometry>();
                         var existingGeom = spPr.GetFirstChild<Drawing.PresetGeometry>();
                         if (existingGeom != null)
+                        {
                             existingGeom.Preset = preset;
+                            ReconcileAdjustGuides(existingGeom);
+                        }
                         else
                             {
                             var newGeom = EnsurePresetGeometry(spPr);
@@ -2696,6 +2702,17 @@ public partial class PowerPointHandler
             txBody.Elements<Drawing.Paragraph>().Last().AppendChild(savedEndParaRPr);
     }
 
+    /// <summary>
+    /// Resolve the SlidePart that owns a table cell — the part an image fill's
+    /// relationship (and image part) belongs to. Null when the cell is not on a
+    /// slide (a table on a layout/master has no typed image path here).
+    /// </summary>
+    private static DocumentFormat.OpenXml.Packaging.SlidePart? ResolveCellSlidePart(Drawing.TableCell cell)
+    {
+        var rootElement = cell.Ancestors<OpenXmlElement>().LastOrDefault() ?? cell;
+        return rootElement is DocumentFormat.OpenXml.Presentation.Slide slide ? slide.SlidePart : null;
+    }
+
     private static List<string> SetTableCellProperties(Drawing.TableCell cell, Dictionary<string, string> properties)
     {
         var unsupported = new List<string>();
@@ -2925,18 +2942,18 @@ public partial class PowerPointHandler
                     tcPr.RemoveAllChildren<Drawing.NoFill>();
                     tcPr.RemoveAllChildren<Drawing.GradientFill>();
                     tcPr.RemoveAllChildren<Drawing.BlipFill>();
-                    // Insert fill after border line elements to maintain CT_TableCellProperties schema order
-                    var lastBorder = tcPr.ChildElements.LastOrDefault(c =>
-                        c is Drawing.LeftBorderLineProperties
-                        or Drawing.RightBorderLineProperties
-                        or Drawing.TopBorderLineProperties
-                        or Drawing.BottomBorderLineProperties
-                        or Drawing.TopLeftToBottomRightBorderLineProperties
-                        or Drawing.BottomLeftToTopRightBorderLineProperties);
-                    if (lastBorder != null)
-                        lastBorder.InsertAfterSelf(newCellFill);
-                    else
-                        tcPr.Append(newCellFill);
+                    // CONSISTENCY(cell-fill-schema-order): place the fill by the
+                    // SDK's own CT_TableCellProperties particle order instead of
+                    // anchoring it "after the last border element". That hand
+                    // anchor ignored an existing <a:cell3D> — which the schema
+                    // puts *before* the fill — so re-setting the fill of an
+                    // already-beveled cell moved the bevel behind the fill and
+                    // validate then rejected the package ("unexpected child
+                    // element …main:cell3D"). Place() only relocates the child
+                    // just added and delegates the order to the same compiled
+                    // comparator the validator uses (see Core.SchemaOrder).
+                    tcPr.Append(newCellFill);
+                    SchemaOrder.Place(tcPr, newCellFill);
                     break;
                 }
                 case "align" or "alignment" or "halign":
@@ -3791,6 +3808,52 @@ public partial class PowerPointHandler
                     }
                     break;
                 }
+                case "image.relid":
+                {
+                    // Get surfaces a cell's picture fill as fill="image" +
+                    // image.relId=<the embedded image's relationship id>. Only
+                    // the image= sibling had a Set arm, so dump emitted a key no
+                    // consumer knew: the emitted `set tc` was reported
+                    // "unsupported props" — and since the same call also applied
+                    // the cell's border keys, the unknown sibling was swallowed
+                    // and the replay reported success with the blipFill gone.
+                    // Consume the key by pointing the cell at a relationship the
+                    // caller already carries: the batch emitter pins the source
+                    // ImagePart, under its source rId, right after `add slide`
+                    // (PptxBatchEmitter's picture-fill carrier), so replay
+                    // re-attaches the source's own image instead of adding a
+                    // second copy of the same bytes.
+                    var ownerPart = ResolveCellSlidePart(cell);
+                    if (ownerPart == null) { unsupported.Add(key); break; }
+
+                    // Validate before modifying (atomic: no data loss on invalid input)
+                    var relId = value?.Trim() ?? "";
+                    if (relId.Length == 0)
+                        throw new ArgumentException("image.relId requires a relationship id");
+                    DocumentFormat.OpenXml.Packaging.ImagePart? imgPart = null;
+                    try { imgPart = ownerPart.GetPartById(relId) as DocumentFormat.OpenXml.Packaging.ImagePart; }
+                    catch { imgPart = null; }
+                    if (imgPart == null)
+                        throw new ArgumentException(
+                            $"image.relId '{relId}' does not resolve to an image part of this slide");
+
+                    var tcPr = cell.TableCellProperties ?? cell.GetFirstChild<Drawing.TableCellProperties>();
+                    if (tcPr == null) { tcPr = new Drawing.TableCellProperties(); cell.Append(tcPr); }
+                    tcPr.RemoveAllChildren<Drawing.SolidFill>();
+                    tcPr.RemoveAllChildren<Drawing.NoFill>();
+                    tcPr.RemoveAllChildren<Drawing.GradientFill>();
+                    tcPr.RemoveAllChildren<Drawing.BlipFill>();
+
+                    var blipFill = new Drawing.BlipFill(
+                        new Drawing.Blip { Embed = relId },
+                        new Drawing.Stretch(new Drawing.FillRectangle())
+                    );
+                    // CONSISTENCY(cell-fill-schema-order): same placement as
+                    // the solid/gradient fill arm.
+                    tcPr.Append(blipFill);
+                    SchemaOrder.Place(tcPr, blipFill);
+                    break;
+                }
                 case "image":
                 {
                     // Validate before modifying (atomic: no data loss on invalid input)
@@ -3807,9 +3870,7 @@ public partial class PowerPointHandler
                     var (cellImgStream, cellImgType) = OfficeCli.Core.ImageSource.Resolve(value);
                     using var cellImgDispose = cellImgStream;
                     // Find the SlidePart — the method is called from Set which has the slidePart context
-                    var rootElement = cell.Ancestors<OpenXmlElement>().LastOrDefault() ?? cell;
-                    var ownerPart = rootElement is DocumentFormat.OpenXml.Presentation.Slide slide
-                        ? slide.SlidePart : null;
+                    var ownerPart = ResolveCellSlidePart(cell);
                     if (ownerPart == null) { unsupported.Add(key); break; }
 
                     var imgPart = ownerPart.AddImagePart(cellImgType);

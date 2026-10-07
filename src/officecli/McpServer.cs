@@ -18,8 +18,15 @@ namespace OfficeCli;
 /// </summary>
 public static class McpServer
 {
+    /// <summary>
+    /// True once this process serves the MCP stdio protocol; stdin is then the
+    /// JSON-RPC channel, not a payload source (see CommandBuilder.ReadStdInPayload).
+    /// </summary>
+    internal static volatile bool InMcpMode;
+
     public static async Task RunAsync()
     {
+        InMcpMode = true;
         using var reader = new StreamReader(Console.OpenStandardInput());
         using var writer = new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true };
 

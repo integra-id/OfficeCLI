@@ -579,7 +579,8 @@ public partial class ExcelHandler
             refMapper: r => RemapRowsInRangeRef(r, map),
             formulaTextMapper: f => Core.FormulaRefShifter.ApplyRowRenumberMap(f, sheetName, sheetName, map),
             rowMarkerShift: m => map.TryGetValue(m + 1, out var n) ? n - 1 : m,
-            crossSheetFormulaMapper: (other, f) => Core.FormulaRefShifter.ApplyRowRenumberMap(f, other, sheetName, map));
+            crossSheetFormulaMapper: (other, f) => Core.FormulaRefShifter.ApplyRowRenumberMap(f, other, sheetName, map),
+            preserveFreezeCounts: true);
     }
 
     private void ApplyColRenumberToSheet(WorksheetPart worksheet, string sheetName, IReadOnlyDictionary<int, int> map)
@@ -593,7 +594,8 @@ public partial class ExcelHandler
             refMapper: r => RemapColsInRangeRef(r, map),
             formulaTextMapper: f => Core.FormulaRefShifter.ApplyColRenumberMap(f, sheetName, sheetName, map),
             colMarkerShift: m => map.TryGetValue(m + 1, out var n) ? n - 1 : m,
-            crossSheetFormulaMapper: (other, f) => Core.FormulaRefShifter.ApplyColRenumberMap(f, other, sheetName, map));
+            crossSheetFormulaMapper: (other, f) => Core.FormulaRefShifter.ApplyColRenumberMap(f, other, sheetName, map),
+            preserveFreezeCounts: true);
     }
 
     private static string? RemapColsInRangeRef(string? refStr, IReadOnlyDictionary<int, int> map)

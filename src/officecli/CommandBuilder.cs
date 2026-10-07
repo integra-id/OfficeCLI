@@ -54,12 +54,25 @@ static partial class CommandBuilder
                 return 0;
             }
 
+            // Explicit open bypasses TryResident. Report the predecessor's
+            // dirty marker before a new resident can hide or overwrite it.
+            List<CliWarning>? warnings = null;
+            var lostEdits = ResidentDirtyMarker.Consume(filePath);
+            if (lostEdits != null)
+            {
+                Console.Error.WriteLine($"WARNING: {lostEdits}");
+                warnings = new List<CliWarning>
+                {
+                    new() { Message = lostEdits, Code = ResidentDirtyMarker.WarningCode }
+                };
+            }
+
             if (!TryStartResidentProcess(filePath, idleSeconds: null, out var startError))
                 throw new InvalidOperationException(startError);
 
             var startedMsg = $"Opened {file.Name} (resident started). "
                            + $"Still pass the file path on every command (e.g. get \"{file.Name}\" /body); run 'close {file.Name}' when done.";
-            if (json) Console.WriteLine(OutputFormatter.WrapEnvelopeText(startedMsg));
+            if (json) Console.WriteLine(OutputFormatter.WrapEnvelopeText(startedMsg, warnings));
             else Console.WriteLine(startedMsg);
             return 0;
         }, json); });
@@ -1300,7 +1313,7 @@ static partial class CommandBuilder
                 if (string.IsNullOrEmpty(item.Command))
                     throw new InvalidOperationException(
                         "Batch item missing required 'command' field. " +
-                        "Valid commands: get, query, set, add, remove, move, view, raw, validate. " +
+                        "Valid commands: meta, get, query, set, add, import, remove, move, swap, view, raw, raw-set, add-part, validate. " +
                         "Example: {\"command\": \"set\", \"path\": \"/Sheet1/A1\", \"props\": {\"value\": \"hello\"}}");
                 // A "command" containing whitespace is almost always a whole CLI
                 // line stuffed into the verb field (e.g. "add /slide[1] --type
@@ -1312,7 +1325,7 @@ static partial class CommandBuilder
                       + " rest in sibling fields, e.g. {\"command\":\"add\",\"parent\":\"/slide[1]\",\"type\":\"shape\","
                       + "\"props\":{...}}. Run `help batch` for the item schema."
                     : " Run `help batch` for the JSON item schema.";
-                throw new InvalidOperationException($"Unknown command: '{item.Command}'. Valid commands: get, query, set, add, remove, move, swap, view, raw, validate.{batchHint}");
+                throw new InvalidOperationException($"Unknown command: '{item.Command}'. Valid commands: meta, get, query, set, add, import, remove, move, swap, view, raw, raw-set, add-part, validate.{batchHint}");
         }
     }
 
@@ -1608,6 +1621,14 @@ static partial class CommandBuilder
         {
             var token = tokens[i];
 
+            // The value of a mistyped `--props` is reported with that option's
+            // error (RejectUnknownOptionTokens), not as a bare property.
+            if (token is "--props" or "-props" or "--prop=")
+            {
+                if (i + 1 < tokens.Count && !tokens[i + 1].StartsWith("--")) i++;
+                continue;
+            }
+
             // Pattern 1: bare key=value (e.g. "text=Hello")
             if (System.Text.RegularExpressions.Regex.IsMatch(token, @"^[A-Za-z_.][A-Za-z0-9_.]*=.+$"))
             {
@@ -1633,24 +1654,23 @@ static partial class CommandBuilder
                 }
             }
 
-            // Pattern 3 (BUG-BT-R6): common typos for the `--prop` option name.
-            // `--props '{"k":"v"}'` is silently swallowed by System.CommandLine
-            // because `--props` (with trailing s) is not a known option, so the
-            // JSON value goes into UnmatchedTokens too. Catch the typo so the
-            // existing warning machinery emits a clear hint instead of letting
-            // the agent ship a shape with no text.
-            if (token is "--props" or "-props" or "--prop=" && i + 1 < tokens.Count)
-            {
-                var nextToken = tokens[i + 1];
-                if (!nextToken.StartsWith("--"))
-                {
-                    result.Add($"--prop {nextToken}");
-                    i++;
-                    continue;
-                }
-            }
         }
         return result;
+    }
+
+    /// <summary>
+    /// Example --prop flags for a value passed to the mistyped `--props`:
+    /// "k=v,k2=v2" becomes "--prop k=v --prop k2=v2"; anything else (a JSON
+    /// object, a value that itself contains a comma) gets a generic example.
+    /// </summary>
+    private static string PropsTypoSuggestion(string? value)
+    {
+        const string generic = "--prop key=value --prop key2=value2";
+        if (string.IsNullOrWhiteSpace(value) || value.TrimStart().StartsWith('{')) return generic;
+        var segments = value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length > 0 && segments.All(s => s.IndexOf('=') > 0)
+            ? string.Join(" ", segments.Select(s => $"--prop {s}"))
+            : generic;
     }
 
     /// <summary>
@@ -1672,12 +1692,24 @@ static partial class CommandBuilder
         {
             var token = tokens[i];
             if (token == "--") break;                       // explicit passthrough separator
+            // `--props` is not an option: System.CommandLine leaves it and its
+            // value unmatched, so every property in it would be dropped and the
+            // command would go on without them (BUG-BT-R6).
+            if (token is "--props" or "-props" or "--prop=")
+            {
+                var propsValue = i + 1 < tokens.Count && !tokens[i + 1].StartsWith("--") ? tokens[i + 1] : null;
+                throw new OfficeCli.Core.CliException($"Unrecognized option '{token}'.")
+                {
+                    Code = "invalid_argument",
+                    Suggestion = $"Pass each property with its own --prop, e.g. {PropsTypoSuggestion(propsValue)}"
+                };
+            }
             if (!token.StartsWith("--") || token.Length <= 2) continue;
             var key = token[2..];
             if (key.Contains('='))                          // --key=value form
                 key = key[..key.IndexOf('=')];
             if (claimedKeys.Contains(key)) continue;        // already warned as missing --prop
-            if (key is "props" or "prop") continue;         // typo forms handled above
+            if (key is "prop") continue;                    // bare --prop: left to the parser
             var valueHint = i + 1 < tokens.Count && !tokens[i + 1].StartsWith("--")
                 ? $"{key}={tokens[i + 1]}"
                 : $"{key}=<value>";

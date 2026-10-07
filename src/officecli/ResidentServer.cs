@@ -840,6 +840,15 @@ public class ResidentServer : IDisposable
             var isBatch = request.Command.Equals("batch", StringComparison.OrdinalIgnoreCase);
             var batchFailure = isBatch && _lastBatchHadFailure;
 
+            // A failed refresh writes its reason to stderr and returns; the
+            // generic stderr inspection below finds no token in it, so text
+            // mode used to answer exit 0 for a refresh that did not happen.
+            // ExecuteRefresh records the verdict in _lastRefreshFailed (reset
+            // at the start of every refresh), so both modes agree with the
+            // one-shot path — see the field's declaration.
+            var isRefresh = request.Command.Equals("refresh", StringComparison.OrdinalIgnoreCase);
+            var refreshFailure = isRefresh && _lastRefreshFailed;
+
             // BUG-INTERVIEW-EDIT-R2: batch text-mode envelope is written by
             // the client via Console.Write (not WriteLine) to avoid double-
             // newlining single-command output. Without a trailing '\n' on
@@ -912,7 +921,7 @@ public class ResidentServer : IDisposable
                 // something was applied when nothing was. Single-command
                 // marker precedence (all-unsupported set → 2) is unchanged.
                 int jsonExitCode = 0;
-                if (batchFailure || validateFailure || finalizeFailure)
+                if (batchFailure || validateFailure || finalizeFailure || refreshFailure)
                     jsonExitCode = 1;
                 else if (rawCaveats || stderr.Contains("UNSUPPORTED") || stderr.Contains(UnrecognizedLatexMarker))
                     jsonExitCode = 2;
@@ -927,7 +936,7 @@ public class ResidentServer : IDisposable
             // errors (rawCaveats — the mutation is applied, see
             // ReportRawMutationOutcome; exit 1 here made callers retry and
             // duplicate content, issue #374).
-            int exitCode = (batchFailure || validateFailure || finalizeFailure) ? 1
+            int exitCode = (batchFailure || validateFailure || finalizeFailure || refreshFailure) ? 1
                 : ((rawCaveats || stderr.Contains("UNSUPPORTED") || stderr.Contains(UnrecognizedLatexMarker)) ? 2
                 : 0);
             return MakeResponse(exitCode, stdout, stderr);
@@ -1123,6 +1132,10 @@ public class ResidentServer : IDisposable
                 ExecuteQuery(request, format);
                 break;
             case "set":
+                // Reject missing Excel sheets before promotion latches _dirty;
+                // otherwise save/idle-autosave can rewrite an untouched file.
+                if (_handler is ExcelHandler excel)
+                    excel.ValidateSetSheet(request.GetArg("path"));
                 PromoteToEditable();
                 ExecuteSet(request);
                 NotifyWatchSlideChanged(request.GetArg("path"));
@@ -1640,6 +1653,7 @@ public class ResidentServer : IDisposable
                 int pptGridCols = gridCols < 0
                     ? OfficeCli.Core.HtmlScreenshot.AutoGridColumns((pEnd ?? pptShotHandler.GetSlideCount()) - (pStart ?? 1) + 1, nativeW, nativeH)
                     : gridCols;
+                OfficeCli.Core.NativeRenderFailure? nativeFailure = null;
                 if (renderMode != "html" && OperatingSystem.IsWindows())
                 {
                     // A read-only handler holds only read access with FileShare.ReadWrite,
@@ -1660,10 +1674,10 @@ public class ResidentServer : IDisposable
                     try
                     {
                         directPng = pptGridCols > 0
-                            ? OfficeCli.Core.PowerPointPngBackend.RenderGrid(_filePath, ps, gEnd, gCellW, gCellH, pptGridCols, gGap, gPad)
-                            : OfficeCli.Core.PowerPointPngBackend.Render(_filePath, ps, pEnd ?? ps, exportW, exportH);
+                            ? OfficeCli.Core.PowerPointPngBackend.RenderGrid(_filePath, ps, gEnd, gCellW, gCellH, pptGridCols, gGap, gPad, out nativeFailure)
+                            : OfficeCli.Core.PowerPointPngBackend.Render(_filePath, ps, pEnd ?? ps, exportW, exportH, out nativeFailure);
                     }
-                    catch { directPng = null; }
+                    catch (Exception ex) { directPng = null; nativeFailure = OfficeCli.Core.NativeRenderFailure.FromException(ex); }
                     if (_editable)
                     {
                         _handler = OfficeCli.Handlers.DocumentHandlerFactory.Open(_filePath, _editable);
@@ -1671,10 +1685,7 @@ public class ResidentServer : IDisposable
                     }
                 }
                 if (renderMode == "native" && directPng == null)
-                {
-                    Console.Error.WriteLine("--render native requires Windows with Microsoft PowerPoint installed.");
-                    return;
-                }
+                    throw OfficeCli.Core.NativeRenderFailure.ToCliException("PowerPoint", nativeFailure);
                 if (directPng == null)
                 {
                     html = CommandBuilder.RenderViaRegistry(pptShotHandler, "pptx", new OfficeCli.Core.Rendering.RenderOptions
@@ -1689,7 +1700,7 @@ public class ResidentServer : IDisposable
                 }
             }
             else if (_handler is OfficeCli.Handlers.ExcelHandler excelShotHandler)
-                html = CommandBuilder.RenderViaRegistry(excelShotHandler, "xlsx", new OfficeCli.Core.Rendering.RenderOptions())!;
+                html = CommandBuilder.RenderViaRegistry(excelShotHandler, "xlsx", new OfficeCli.Core.Rendering.RenderOptions { CellRange = rangeArg })!;
             else if (_handler is OfficeCli.Handlers.WordHandler wordShotGrid && gridCols != 0)
             {
                 // Contact-sheet grid — mirrors CommandBuilder.View.cs's docx grid
@@ -1718,11 +1729,12 @@ public class ResidentServer : IDisposable
                 // Native-first on Windows: release an editable write lock (blocks
                 // Word) before rendering, then reopen — same dance as the single-page
                 // branch below.
+                OfficeCli.Core.NativeRenderFailure? nativeFailure = null;
                 if (renderMode != "html" && OperatingSystem.IsWindows())
                 {
                     if (_editable) _handler.Dispose();
-                    try { directPng = OfficeCli.Core.WordPdfBackend.RenderGrid(_filePath, $"1-{gPageCount}", (int)Math.Round(gCellW), (int)Math.Round(gCellH), gCols, gGap, gPad); }
-                    catch { directPng = null; }
+                    try { directPng = OfficeCli.Core.WordPdfBackend.RenderGrid(_filePath, $"1-{gPageCount}", (int)Math.Round(gCellW), (int)Math.Round(gCellH), gCols, gGap, gPad, out nativeFailure); }
+                    catch (Exception ex) { directPng = null; nativeFailure = OfficeCli.Core.NativeRenderFailure.FromException(ex); }
                     if (_editable)
                     {
                         _handler = OfficeCli.Handlers.DocumentHandlerFactory.Open(_filePath, _editable);
@@ -1730,10 +1742,7 @@ public class ResidentServer : IDisposable
                     }
                 }
                 if (renderMode == "native" && directPng == null)
-                {
-                    Console.Error.WriteLine("--render native requires Windows with Microsoft Word installed.");
-                    return;
-                }
+                    throw OfficeCli.Core.NativeRenderFailure.ToCliException("Word", nativeFailure);
                 if (directPng == null)
                 {
                     html = CommandBuilder.RenderViaRegistry(wordShotGrid, "docx", new OfficeCli.Core.Rendering.RenderOptions
@@ -1747,6 +1756,7 @@ public class ResidentServer : IDisposable
                 var effectiveFilter = rangeArg != null
                     ? pageFilter
                     : (string.IsNullOrEmpty(pageFilter) ? "1" : pageFilter);
+                OfficeCli.Core.NativeRenderFailure? nativeFailure = null;
                 if (renderMode != "html" && OperatingSystem.IsWindows())
                 {
                     // See the pptx branch: only an editable handler must be released
@@ -1754,7 +1764,8 @@ public class ResidentServer : IDisposable
                     if (_editable) _handler.Dispose();
                     // effectiveFilter is only null under --range, which forces
                     // renderMode=html — this native branch is then unreachable.
-                    try { directPng = OfficeCli.Core.WordPdfBackend.Render(_filePath, effectiveFilter!); } catch { directPng = null; }
+                    try { directPng = OfficeCli.Core.WordPdfBackend.Render(_filePath, effectiveFilter!, out nativeFailure); }
+                    catch (Exception ex) { directPng = null; nativeFailure = OfficeCli.Core.NativeRenderFailure.FromException(ex); }
                     if (_editable)
                     {
                         _handler = OfficeCli.Handlers.DocumentHandlerFactory.Open(_filePath, _editable);
@@ -1762,10 +1773,7 @@ public class ResidentServer : IDisposable
                     }
                 }
                 if (renderMode == "native" && directPng == null)
-                {
-                    Console.Error.WriteLine("--render native requires Windows with Microsoft Word installed.");
-                    return;
-                }
+                    throw OfficeCli.Core.NativeRenderFailure.ToCliException("Word", nativeFailure);
                 if (directPng == null) html = CommandBuilder.RenderViaRegistry(wordShotHandler, "docx",
                     new OfficeCli.Core.Rendering.RenderOptions { PageFilter = effectiveFilter })!;
             }
@@ -2504,11 +2512,24 @@ public class ResidentServer : IDisposable
         }
     }
 
+    // A refresh that fails reports the failure on stderr and returns — it does
+    // not throw, because the handler is reopened either way and the resident
+    // has to stay usable. None of that text is a token the generic stderr
+    // inspection in ProcessRequest looks for, so text mode answered exit 0 for
+    // a refresh that failed (the one-shot path and the JSON envelope both say
+    // 1). Record the verdict here; ProcessRequest reads it and promotes it to a
+    // non-zero exit, exactly as ExecuteBatch / ExecuteValidate do.
+    private bool _lastRefreshFailed;
+
     private void ExecuteRefresh(ResidentRequest req)
     {
+        _lastRefreshFailed = false;
         if (_handler is not OfficeCli.Handlers.WordHandler)
+        {
+            _lastRefreshFailed = true;
             throw new OfficeCli.Core.CliException("refresh currently only supports .docx files.")
             { Code = "unsupported_type" };
+        }
         var tocOnly = req.GetArg("toc", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
         // Refresh opens the package itself. Drop the resident handle first so
         // the write is not fighting an open ZipPackage, then reload whatever
@@ -2525,8 +2546,11 @@ public class ResidentServer : IDisposable
             if (_handler is OfficeCli.Handlers.WordHandler wh) wh.DeferSave = true;
         }
         if (!outcome.Ok)
+        {
+            _lastRefreshFailed = true;
             throw new OfficeCli.Core.CliException(outcome.Message)
             { Code = "refresh_failed" };
+        }
         if (req.Json) Console.WriteLine(OfficeCli.Core.OutputFormatter.WrapEnvelope(outcome.ToJson()));
         else Console.WriteLine(outcome.Message);
     }

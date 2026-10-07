@@ -61,6 +61,9 @@ public partial class ExcelHandler
     /// CellFormula.Text and DefinedName text). Pass null to skip formula
     /// and named-range rewriting (rare — only ops that don't touch
     /// formula content).</param>
+    /// <param name="preserveFreezeCounts">True for a renumber (sort / move),
+    /// which permutes lines without adding or removing any, so the frozen
+    /// pane's row/column counts stay as they are.</param>
     private void ApplySheetRangeMutations(
         WorksheetPart worksheet,
         string sheetName,
@@ -68,7 +71,8 @@ public partial class ExcelHandler
         Func<string, string>? formulaTextMapper,
         Func<int, int>? rowMarkerShift = null,
         Func<int, int>? colMarkerShift = null,
-        Func<string, string, string>? crossSheetFormulaMapper = null)
+        Func<string, string, string>? crossSheetFormulaMapper = null,
+        bool preserveFreezeCounts = false)
     {
         var ws = GetSheet(worksheet);
 
@@ -392,22 +396,35 @@ public partial class ExcelHandler
                 {
                     var newTlc = refMapper(tlc);
                     if (newTlc != null && !string.Equals(newTlc, tlc, StringComparison.Ordinal))
-                    {
                         pane.TopLeftCell = newTlc;
-                        // The freeze boundary itself is xSplit/ySplit, not topLeftCell
-                        // (Excel rewrites topLeftCell with the scroll position on
-                        // every save). Moving only the anchor left the pane saying
-                        // two different things; keep the splits in step so the
-                        // boundary the getter derives is the one Excel shows.
-                        if (pane.State?.Value == PaneStateValues.Frozen)
-                        {
-                            var (newCol, newRow) = ParseCellReference(newTlc);
-                            var colSplit = ColumnNameToIndex(newCol) - 1;
-                            var rowSplit = newRow - 1;
-                            pane.HorizontalSplit = colSplit > 0 ? colSplit : null;
-                            pane.VerticalSplit = rowSplit > 0 ? rowSplit : null;
-                        }
+                }
+                // The freeze boundary is xSplit/ySplit ALONE (the frozen row /
+                // column COUNTS). topLeftCell is only the scrolled pane's scroll
+                // position, which Excel rewrites on every save made while
+                // scrolled, so the splits must never be derived from it: they
+                // used to be, and on any scrolled sheet a single insert above
+                // the scroll position turned a one-row freeze into a freeze of
+                // hundreds of rows (#454).
+                //
+                // Shift the counts with the axis' 0-based line shift instead:
+                //   newCount = min(shift(count), shift(count - 1) + 1)
+                // which grows the band when a line is inserted inside it,
+                // shrinks it when a frozen line is deleted, and leaves it alone
+                // for an insert at / below the boundary or a delete below it.
+                // A renumber (sort / row move) only permutes lines, so it keeps
+                // the counts as they are.
+                if (!preserveFreezeCounts && pane != null && pane.State?.Value == PaneStateValues.Frozen)
+                {
+                    static int ShiftCount(int count, Func<int, int>? shift)
+                    {
+                        if (count <= 0 || shift == null) return count;
+                        return Math.Max(0, Math.Min(shift(count), shift(count - 1) + 1));
                     }
+                    int xs = (int)(pane.HorizontalSplit?.Value ?? 0);
+                    int ys = (int)(pane.VerticalSplit?.Value ?? 0);
+                    int nxs = ShiftCount(xs, colMarkerShift), nys = ShiftCount(ys, rowMarkerShift);
+                    if (nxs != xs) pane.HorizontalSplit = nxs > 0 ? nxs : null;
+                    if (nys != ys) pane.VerticalSplit = nys > 0 ? nys : null;
                 }
                 foreach (var sel in sv.Elements<Selection>())
                 {

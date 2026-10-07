@@ -73,7 +73,7 @@ static partial class CommandBuilder
                 // stdin reader hands it through. Without this, `import --stdin`
                 // fed a BOM'd CSV put a stray U+FEFF inside the first header
                 // cell while `import --file` on the same bytes did not.
-                csvContent = StripBom(StdIn.ReadToEnd());
+                csvContent = ReadStdInPayload("import", "Pass the data as a <source-file> path instead of --stdin.");
                 if (csvContent.Length >= 4)
                     RejectBinaryImportSource(csvContent[0], csvContent[1], csvContent[2], csvContent[3], "on stdin");
             }
