@@ -751,6 +751,15 @@ public partial class PowerPointHandler
                 if (ph?.Index?.HasValue == true) slidePlaceholders.Add($"idx:{ph.Index.Value}");
                 if (ph?.Type?.HasValue == true) slidePlaceholders.Add($"type:{ph.Type.InnerText}");
             }
+            // A filled picture placeholder is a <p:pic>, not a <p:sp> — it
+            // occupies its layout slot just the same.
+            foreach (var pic in slideShapeTree.Elements<Picture>())
+            {
+                var ph = pic.NonVisualPictureProperties?.ApplicationNonVisualDrawingProperties
+                    ?.GetFirstChild<PlaceholderShape>();
+                if (ph?.Index?.HasValue == true) slidePlaceholders.Add($"idx:{ph.Index.Value}");
+                if (ph?.Type?.HasValue == true) slidePlaceholders.Add($"type:{ph.Type.InnerText}");
+            }
         }
 
         // Render shapes from SlideLayout (higher priority)

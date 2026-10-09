@@ -781,8 +781,25 @@ public partial class WordHandler
                     }
                     if (gSizePt <= 0) gSizePt = 12.0;
 
+                    // On a line grid Word treats an "auto" w:line multiplier as a
+                    // multiple of ONE grid pitch (1.5x on a 15.6pt grid is 23.4pt,
+                    // not rounded to whole grid lines), floored by the whole number
+                    // of grid lines the font itself needs. Measured in Word on a
+                    // 312-twip grid with Calibri: 11pt 1.0/1.15/1.5/2.0/3.0x ->
+                    // 15.6/17.9/23.4/31.2/46.8pt; 16pt 1.5x -> 31.2pt; 22pt
+                    // 1.0/1.5/3.0x -> 31.2/31.2/46.8pt.
+                    double lineMult = 1.0;
+                    var gLineVal = pProps.SpacingBetweenLines?.Line?.Value
+                                   ?? styleSpacing?.Line?.Value;
+                    var gRule = pProps.SpacingBetweenLines?.LineRule?.InnerText
+                                ?? styleSpacing?.LineRule?.InnerText;
+                    if ((gRule == "auto" || gRule == null)
+                        && int.TryParse(gLineVal, out var gLvNum) && gLvNum > 0)
+                        lineMult = gLvNum / 240.0;
+
                     double fontHeightPt = gSizePt * gRatio;
-                    double snappedPt = Math.Ceiling(fontHeightPt / gridPitchPt) * gridPitchPt;
+                    double fontFloorPt = Math.Ceiling(fontHeightPt / gridPitchPt) * gridPitchPt;
+                    double snappedPt = Math.Max(fontFloorPt, lineMult * gridPitchPt);
                     parts.RemoveAll(p => p.StartsWith("line-height"));
                     parts.Add($"line-height:{snappedPt:0.##}pt");
                 }

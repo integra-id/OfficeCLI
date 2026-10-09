@@ -259,7 +259,7 @@ public partial class PowerPointHandler
         }
         else
         {
-            var resolved = ResolveInheritedPosition(shape, part);
+            var resolved = SlideComposition.ResolveInheritedPosition(shape, part);
             if (resolved == null)
             {
                 if (string.IsNullOrWhiteSpace(GetShapeText(shape))) return;
@@ -886,12 +886,29 @@ public partial class PowerPointHandler
         (long x, long y, long cx, long cy)? overridePos = null)
     {
         var xfrm = pic.ShapeProperties?.Transform2D;
-        if (xfrm?.Offset == null || xfrm?.Extents == null) return;
+        // Same frame rule as the HTML renderer: a picture filled into a picture
+        // placeholder carries <p:ph> and an empty spPr, so its frame comes from
+        // the layout/master slot via SlideComposition.
+        var pos = overridePos;
+        if (pos == null)
+        {
+            if (xfrm?.Offset != null && xfrm.Extents != null)
+                pos = (xfrm.Offset.X?.Value ?? 0, xfrm.Offset.Y?.Value ?? 0,
+                    xfrm.Extents.Cx?.Value ?? 0, xfrm.Extents.Cy?.Value ?? 0);
+            else
+            {
+                var picPh = pic.NonVisualPictureProperties?.ApplicationNonVisualDrawingProperties
+                    ?.GetFirstChild<PlaceholderShape>();
+                var inherited = SlideComposition.ResolveInheritedFrame(picPh, slidePart);
+                if (inherited != null) pos = (inherited.X, inherited.Y, inherited.Cx, inherited.Cy);
+            }
+        }
+        if (pos == null) return;
 
-        double px = EmuToPx(overridePos?.x ?? xfrm.Offset.X?.Value ?? 0);
-        double py = EmuToPx(overridePos?.y ?? xfrm.Offset.Y?.Value ?? 0);
-        double pw = EmuToPx(overridePos?.cx ?? xfrm.Extents.Cx?.Value ?? 0);
-        double ph = EmuToPx(overridePos?.cy ?? xfrm.Extents.Cy?.Value ?? 0);
+        double px = EmuToPx(pos.Value.x);
+        double py = EmuToPx(pos.Value.y);
+        double pw = EmuToPx(pos.Value.cx);
+        double ph = EmuToPx(pos.Value.cy);
         if (pw <= 0 || ph <= 0) return;
 
         // Extract image
@@ -916,7 +933,7 @@ public partial class PowerPointHandler
 
         // Transform
         var transforms = new List<string> { $"translate({px:0.##},{py:0.##})" };
-        if (xfrm.Rotation != null && xfrm.Rotation.Value != 0)
+        if (xfrm?.Rotation != null && xfrm.Rotation.Value != 0)
             transforms.Add($"rotate({xfrm.Rotation.Value / 60000.0:0.##},{pw / 2:0.##},{ph / 2:0.##})");
 
         // Clip for crop

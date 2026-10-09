@@ -1020,6 +1020,17 @@ public partial class PowerPointHandler
             }
         }
 
+        // SlideComposition (issue #466): a placeholder shape with no own xfrm —
+        // a title with an empty spPr, for example — inherits its whole frame
+        // from the layout/master slot (xfrm is atomic; see the module header).
+        // Report the EFFECTIVE frame with provenance, mirroring the
+        // effective.*.src convention StyleList already uses for inherited text
+        // properties. Bare x/y stay OWN-only: their absence is what tells the
+        // reader the shape does not own its position.
+        if (phElemForNode != null && part is SlidePart shapeSlotPart
+            && !SlideComposition.HasCompleteOwnFrame(xfrm))
+            EmitInheritedFrame(node, phElemForNode, shapeSlotPart, slideNum);
+
         // Shape fill
         var shapeFill = shape.ShapeProperties?.GetFirstChild<Drawing.SolidFill>();
         var shapeFillColor = ReadColorFromFill(shapeFill);
@@ -2722,6 +2733,35 @@ public partial class PowerPointHandler
         if (picXfrm?.HorizontalFlip?.Value == true) node.Format["flipH"] = true;
         if (picXfrm?.VerticalFlip?.Value == true) node.Format["flipV"] = true;
 
+        // CONSISTENCY(picture-placeholder-identity): a picture filled into a
+        // picture placeholder carries <p:ph> exactly like a placeholder shape
+        // does. ShapeToNode surfaces phType/phIndex/phBare; without this, a
+        // slot-bound picture looked like a plain picture and the slot binding
+        // was invisible to get — the picture "had no position" instead of
+        // "inherited its position from slot idx=1".
+        var picPhElem = pic.NonVisualPictureProperties?.ApplicationNonVisualDrawingProperties
+            ?.GetFirstChild<PlaceholderShape>();
+        if (picPhElem != null)
+        {
+            var picPhTypeStr = FormatPlaceholderType(picPhElem.Type?.Value);
+            if (picPhTypeStr != null) node.Format["phType"] = picPhTypeStr;
+            if (picPhElem.Index?.Value is uint picPhIdx) node.Format["phIndex"] = picPhIdx;
+            // Same round-trip marker as ShapeToNode: a truly BARE <p:ph/>
+            // (no type, no idx) must not silently become type=body on replay.
+            if (picPhElem.Type?.Value == null && picPhElem.Index?.Value == null)
+                node.Format["phBare"] = "true";
+        }
+
+        // SlideComposition (issue #466): a slot-bound picture owns NO xfrm —
+        // its frame belongs to the layout/master placeholder. Report the
+        // EFFECTIVE frame with provenance, same effective.*.src convention as
+        // the ShapeToNode path above and StyleList's inherited text values.
+        // Bare x/y stay OWN-only: their absence is what tells the reader the
+        // picture does not own its position.
+        if (picPhElem != null && slidePart != null
+            && !SlideComposition.HasCompleteOwnFrame(picXfrm))
+            EmitInheritedFrame(node, picPhElem, slidePart, slideNum);
+
         // CONSISTENCY(picture-geometry): a picture can be "cropped to shape" via a
         // non-rectangle <a:prstGeom> on its spPr (e.g. prst="ellipse"). AddPicture
         // stamps a default rect, so without surfacing the preset the crop-to-shape
@@ -3623,5 +3663,24 @@ public partial class PowerPointHandler
             }
         }
         return null;
+    }
+
+    /// <summary>
+    /// Report the frame a slot-bound shape or picture inherits from its
+    /// layout/master placeholder as <c>effective.x/y/width/height</c> with the
+    /// slot as <c>effective.*.src</c>. Bare x/y stay own-only: their absence
+    /// is what tells the reader the element does not own its position.
+    /// </summary>
+    private static void EmitInheritedFrame(DocumentNode node, PlaceholderShape ph, SlidePart slidePart, int slideNum)
+    {
+        var frame = SlideComposition.ResolveInheritedFrame(ph, slidePart);
+        if (frame == null) return;
+        var src = SlideComposition.ProvenancePath(slideNum, frame);
+        node.Format["effective.x"] = FormatEmu(frame.X);
+        node.Format["effective.y"] = FormatEmu(frame.Y);
+        node.Format["effective.width"] = FormatEmu(frame.Cx);
+        node.Format["effective.height"] = FormatEmu(frame.Cy);
+        foreach (var k in new[] { "x", "y", "width", "height" })
+            node.Format[$"effective.{k}.src"] = src;
     }
 }

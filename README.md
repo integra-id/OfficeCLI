@@ -19,7 +19,7 @@ Open-source. Single binary. No Office installation. No dependencies. Works every
 
 Upstream OfficeCLI already creates and edits `.docx` / `.xlsx` / `.pptx` with no Office install. This fork’s branch adds the pieces a technical-document skill needs: embed HTML as `w:altChunk`, turn supported chunks into native OOXML without Word, rebuild TOC entries, apply an A4 + Moderate page preset, and fit ID columns so short codes stay on one line.
 
-Assembly version on this branch: `1.0.155-htmlchunk.1` (`src/officecli/officecli.csproj`). The guide below is the upstream README. Fork-only behavior is this section, [examples/word/html-chunk.md](examples/word/html-chunk.md), and the skills under `skills/`.
+Assembly version on this branch: `1.0.156-htmlchunk.1` (`src/officecli/officecli.csproj`). The guide below is the upstream README. Fork-only behavior is this section, [examples/word/html-chunk.md](examples/word/html-chunk.md), and the skills under `skills/`.
 
 ### What this fork adds
 

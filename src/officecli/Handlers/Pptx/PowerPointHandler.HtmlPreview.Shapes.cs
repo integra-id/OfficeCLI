@@ -95,7 +95,7 @@ public partial class PowerPointHandler
         else
         {
             // No xfrm — try to inherit position from matching layout/master placeholder
-            var resolved = ResolveInheritedPosition(shape, part);
+            var resolved = SlideComposition.ResolveInheritedPosition(shape, part);
             if (resolved == null)
             {
                 // No text content → skip silently
@@ -149,7 +149,7 @@ public partial class PowerPointHandler
         // ResolveInheritedPosition walk. Explicit slide fill still wins.
         if (string.IsNullOrEmpty(fillCss))
         {
-            var inheritedPh = ResolveInheritedPlaceholderShape(shape, part);
+            var inheritedPh = SlideComposition.ResolveInheritedPlaceholderShape(shape, part);
             if (inheritedPh != null)
                 fillCss = GetShapeFillCss(inheritedPh.ShapeProperties, part, themeColors);
         }
@@ -878,85 +878,10 @@ public partial class PowerPointHandler
     }
 
     // ==================== Placeholder Position Inheritance ====================
-
-    /// <summary>
-    /// When a shape has no Transform2D, try to find position from matching placeholder
-    /// on the slide layout or slide master (OOXML placeholder inheritance chain).
-    /// </summary>
-    private static (long x, long y, long cx, long cy)? ResolveInheritedPosition(Shape shape, OpenXmlPart part)
-    {
-        var ph = shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
-            ?.GetFirstChild<PlaceholderShape>();
-
-        // Only placeholder shapes can inherit position from layout/master
-        if (ph == null) return null;
-
-        var slidePart = part as SlidePart;
-        if (slidePart == null) return null;
-
-        // Search layout then master for a matching placeholder
-        var layoutShapeTree = slidePart.SlideLayoutPart?.SlideLayout?.CommonSlideData?.ShapeTree;
-        var masterShapeTree = slidePart.SlideLayoutPart?.SlideMasterPart?.SlideMaster?.CommonSlideData?.ShapeTree;
-
-        foreach (var tree in new[] { layoutShapeTree, masterShapeTree })
-        {
-            if (tree == null) continue;
-            foreach (var candidate in tree.Elements<Shape>())
-            {
-                var candidatePh = candidate.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
-                    ?.GetFirstChild<PlaceholderShape>();
-                if (candidatePh == null) continue;
-
-                if (!PlaceholderMatches(ph, candidatePh)) continue;
-
-                var cxfrm = candidate.ShapeProperties?.Transform2D;
-                if (cxfrm?.Offset != null && cxfrm?.Extents != null)
-                {
-                    return (
-                        cxfrm.Offset.X?.Value ?? 0,
-                        cxfrm.Offset.Y?.Value ?? 0,
-                        cxfrm.Extents.Cx?.Value ?? 0,
-                        cxfrm.Extents.Cy?.Value ?? 0
-                    );
-                }
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// R12-5: find the layout (then master) placeholder shape that the given
-    /// slide placeholder inherits from. Same ph type/idx matching as
-    /// ResolveInheritedPosition, but returns the whole shape so callers can
-    /// read inherited spPr fill/etc. Returns null for non-placeholders.
-    /// </summary>
-    private static Shape? ResolveInheritedPlaceholderShape(Shape shape, OpenXmlPart part)
-    {
-        var ph = shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
-            ?.GetFirstChild<PlaceholderShape>();
-        if (ph == null) return null;
-
-        var slidePart = part as SlidePart;
-        if (slidePart == null) return null;
-
-        var layoutShapeTree = slidePart.SlideLayoutPart?.SlideLayout?.CommonSlideData?.ShapeTree;
-        var masterShapeTree = slidePart.SlideLayoutPart?.SlideMasterPart?.SlideMaster?.CommonSlideData?.ShapeTree;
-
-        foreach (var tree in new[] { layoutShapeTree, masterShapeTree })
-        {
-            if (tree == null) continue;
-            foreach (var candidate in tree.Elements<Shape>())
-            {
-                var candidatePh = candidate.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
-                    ?.GetFirstChild<PlaceholderShape>();
-                if (candidatePh == null) continue;
-                if (PlaceholderMatches(ph, candidatePh)) return candidate;
-            }
-        }
-
-        return null;
-    }
+    // (Slot matching + frame/placeholder resolution moved to SlideComposition —
+    // the shared interpreter of the master/layout/slide model, issue #466.
+    // What stays below are renderer-only helpers: inherited text anchor and
+    // the default-position fallback for unmatched placeholders.)
 
     /// <summary>
     /// Resolve the text vertical anchor (<a:bodyPr anchor="…">) for a placeholder
@@ -985,7 +910,7 @@ public partial class PowerPointHandler
                 var candidatePh = candidate.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
                     ?.GetFirstChild<PlaceholderShape>();
                 if (candidatePh == null) continue;
-                if (!PlaceholderMatches(ph, candidatePh)) continue;
+                if (!SlideComposition.PlaceholderMatches(ph, candidatePh)) continue;
 
                 var candBodyPr = candidate.TextBody?.Elements<Drawing.BodyProperties>().FirstOrDefault();
                 if (candBodyPr?.Anchor?.HasValue == true)
@@ -996,48 +921,6 @@ public partial class PowerPointHandler
         }
 
         return null;
-    }
-
-    /// <summary>
-    /// Check if two placeholder shapes match by type and/or index.
-    /// </summary>
-    private static bool PlaceholderMatches(PlaceholderShape slidePh, PlaceholderShape layoutPh)
-    {
-        // Match by index first (most specific)
-        if (slidePh.Index?.HasValue == true && layoutPh.Index?.HasValue == true)
-            return slidePh.Index.Value == layoutPh.Index.Value;
-
-        // Match by type
-        if (slidePh.Type?.HasValue == true && layoutPh.Type?.HasValue == true)
-            return slidePh.Type.Value == layoutPh.Type.Value;
-
-        // R26-5: slide ph has idx but NO type, layout ph has type but NO idx.
-        // OOXML: a <p:ph idx=N/> with no type defaults to type=body, so it
-        // should inherit from a type=body (or object) layout/master placeholder.
-        // Without this branch all inheritance silently drops for idx-only slide
-        // placeholders bound to a typed layout placeholder.
-        if (slidePh.Index?.HasValue == true && slidePh.Type?.HasValue != true
-            && layoutPh.Type?.HasValue == true && layoutPh.Index?.HasValue != true)
-        {
-            var lt = layoutPh.Type.Value;
-            return lt == PlaceholderValues.Body || lt == PlaceholderValues.Object;
-        }
-
-        // If slide ph has no type/idx, match by name or consider it a body placeholder
-        // Default placeholder type (when type is omitted) is "body" per OOXML spec
-        if (slidePh.Type?.HasValue != true && slidePh.Index?.HasValue != true)
-        {
-            // A typeless/indexless placeholder matches title if the layout has title,
-            // or body/subtitle by convention
-            if (layoutPh.Type?.HasValue == true)
-            {
-                var lt = layoutPh.Type.Value;
-                return lt == PlaceholderValues.Title || lt == PlaceholderValues.CenteredTitle
-                    || lt == PlaceholderValues.SubTitle || lt == PlaceholderValues.Body;
-            }
-        }
-
-        return false;
     }
 
     /// <summary>
@@ -1175,7 +1058,7 @@ public partial class PowerPointHandler
                     var cPh = candidate.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
                         ?.GetFirstChild<PlaceholderShape>();
                     if (cPh == null) continue;
-                    if (!PlaceholderMatches(ph, cPh)) continue;
+                    if (!SlideComposition.PlaceholderMatches(ph, cPh)) continue;
 
                     // Check candidate's list style at the correct level
                     var cLstStyle = candidate.TextBody?.GetFirstChild<Drawing.ListStyle>();
@@ -1295,7 +1178,7 @@ public partial class PowerPointHandler
                     var cPh = candidate.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
                         ?.GetFirstChild<PlaceholderShape>();
                     if (cPh == null) continue;
-                    if (!PlaceholderMatches(ph, cPh)) continue;
+                    if (!SlideComposition.PlaceholderMatches(ph, cPh)) continue;
                     var cLstStyle = candidate.TextBody?.GetFirstChild<Drawing.ListStyle>();
                     if (GetLevelPpr(cLstStyle, level) is { } cppr && match(cppr)) return cppr;
                 }
@@ -1398,12 +1281,30 @@ public partial class PowerPointHandler
     {
         var dataPathAttr = string.IsNullOrEmpty(dataPath) ? "" : $" data-path=\"{HtmlEncode(dataPath)}\"";
         var xfrm = pic.ShapeProperties?.Transform2D;
-        if (xfrm?.Offset == null || xfrm?.Extents == null) return;
-
-        var x = overridePos?.x ?? xfrm.Offset.X?.Value ?? 0;
-        var y = overridePos?.y ?? xfrm.Offset.Y?.Value ?? 0;
-        var cx = overridePos?.cx ?? xfrm.Extents.Cx?.Value ?? 0;
-        var cy = overridePos?.cy ?? xfrm.Extents.Cy?.Value ?? 0;
+        var hasOwnXfrm = xfrm?.Offset != null && xfrm?.Extents != null;
+        // A picture filled into a picture placeholder (PowerPoint "click icon to
+        // add picture") carries <p:ph> and an empty spPr: its frame is inherited
+        // from the layout/master slot, exactly like a placeholder <p:sp> —
+        // resolved through the shared SlideComposition interpreter (issue #466).
+        var pos = overridePos;
+        if (pos == null)
+        {
+            if (hasOwnXfrm)
+            {
+                pos = (xfrm!.Offset!.X?.Value ?? 0, xfrm.Offset.Y?.Value ?? 0,
+                    xfrm.Extents!.Cx?.Value ?? 0, xfrm.Extents.Cy?.Value ?? 0);
+            }
+            else if (slidePart is SlidePart picSlidePart)
+            {
+                var picPh = pic.NonVisualPictureProperties?.ApplicationNonVisualDrawingProperties
+                    ?.GetFirstChild<PlaceholderShape>();
+                var inheritedFrame = SlideComposition.ResolveInheritedFrame(picPh, picSlidePart);
+                if (inheritedFrame != null)
+                    pos = (inheritedFrame.X, inheritedFrame.Y, inheritedFrame.Cx, inheritedFrame.Cy);
+            }
+        }
+        if (pos == null) return;
+        var (x, y, cx, cy) = pos.Value;
 
         // Picture-level hyperlink → wrap the picture <div> in <a> for clickability in
         // HTML preview. CONSISTENCY(shape-picture-parity): RenderShape already does
@@ -1449,17 +1350,17 @@ public partial class PowerPointHandler
         var picTransforms = new List<string>();
 
         // Rotation
-        if (xfrm.Rotation != null && xfrm.Rotation.Value != 0)
+        if (xfrm?.Rotation != null && xfrm.Rotation.Value != 0)
             picTransforms.Add($"rotate({xfrm.Rotation.Value / 60000.0:0.##}deg)");
 
         // Flip — CONSISTENCY(shape-picture-parity): mirror RenderShape's flip
         // block (rotate before scale). A flipH/flipV picture mirrors in real
         // PowerPoint, so view html must do the same.
-        if (xfrm.HorizontalFlip?.Value == true && xfrm.VerticalFlip?.Value == true)
+        if (xfrm?.HorizontalFlip?.Value == true && xfrm.VerticalFlip?.Value == true)
             picTransforms.Add("scale(-1,-1)");
-        else if (xfrm.HorizontalFlip?.Value == true)
+        else if (xfrm?.HorizontalFlip?.Value == true)
             picTransforms.Add("scaleX(-1)");
-        else if (xfrm.VerticalFlip?.Value == true)
+        else if (xfrm?.VerticalFlip?.Value == true)
             picTransforms.Add("scaleY(-1)");
 
         // 3D rotation (scene3d camera rotation) → CSS perspective transform.
