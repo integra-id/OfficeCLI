@@ -858,7 +858,12 @@ public partial class WordHandler
                 // CONSISTENCY(section-type-alias).
                 case "type":
                 case "break":
-                    var st = sectPr.GetFirstChild<SectionType>() ?? sectPr.PrependChild(new SectionType());
+                    var st = sectPr.GetFirstChild<SectionType>();
+                    if (st == null)
+                    {
+                        st = new SectionType();
+                        InsertSectPrChildInOrder(sectPr, st); // w:type ranks after footnotePr/endnotePr
+                    }
                     st.Val = value.ToLowerInvariant() switch
                     {
                         "nextpage" or "next" or "newpage" or "page" => SectionMarkValues.NextPage,

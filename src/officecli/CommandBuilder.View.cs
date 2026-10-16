@@ -284,8 +284,32 @@ static partial class CommandBuilder
 
                     if (directPng == null)
                     {
+                        // A multi-slide range without --grid is a one-column contact
+                        // sheet: the same CSS tiles it and the viewport below follows
+                        // the rows, so --page 1-N is no longer cropped to the first
+                        // slide (issue #485). Native export above keeps its own stack.
+                        int htmlGridCols = gridColsResolved > 0 ? gridColsResolved
+                            : (pStart.HasValue && pEnd.HasValue && pStart.Value != pEnd.Value ? 1 : 0);
+                        if (htmlGridCols > 0)
+                        {
+                            // Mirror the grid CSS in PowerPointHandler.HtmlPreview.cs
+                            // (24px total padding, 12px gap) and HtmlScreenshot.CapDim's
+                            // 1920px ceiling, so the capture is exactly the sheet.
+                            const int pad = 24, gap = 12, maxDim = 1920;
+                            int count = (pEnd ?? pptHandler.GetSlideCount()) - (pStart ?? 1) + 1;
+                            int rows = Math.Max(1, (count + htmlGridCols - 1) / htmlGridCols);
+                            double vpW = screenshotWidth == 1600 && screenshotHeight == 1200 && htmlGridCols == 1
+                                ? nativeW + pad : screenshotWidth;
+                            double cellW = Math.Max(1.0, (vpW - pad - (htmlGridCols - 1) * gap) / htmlGridCols);
+                            double cellH = cellW * nativeH / nativeW;
+                            double vpH = pad + rows * cellH + (rows - 1) * gap;
+                            double over = Math.Max(vpW, vpH) / maxDim;
+                            if (over > 1.0) { vpW /= over; vpH /= over; }
+                            screenshotWidth = Math.Max(1, (int)Math.Round(vpW));
+                            screenshotHeight = Math.Max(1, (int)Math.Ceiling(vpH));
+                        }
                         html = RenderViaRegistry(pptHandler, "pptx", new OfficeCli.Core.Rendering.RenderOptions
-                        { StartPage = pStart, EndPage = pEnd, GridColumns = gridColsResolved, ViewportPx = screenshotWidth })!;
+                        { StartPage = pStart, EndPage = pEnd, GridColumns = htmlGridCols, ViewportPx = screenshotWidth })!;
 
                         // The generic 4:3 viewport (1600×1200) letterboxes a single slide with
                         // canvas padding. When capturing one slide (not a multi-slide range or

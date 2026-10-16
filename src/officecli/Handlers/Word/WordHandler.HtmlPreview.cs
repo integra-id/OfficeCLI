@@ -1263,6 +1263,10 @@ public partial class WordHandler
       var s=pageW>0?cellW/pageW:1;
       page.style.transition='none';page.style.transformOrigin='top left';
       page.style.transform='scale('+s+')';
+      // The page centres itself with margin:0 auto; with a top-left scale that
+      // auto margin shifts the scaled page right by (cellW-pageW)/2 and clips
+      // it at one column (issue #483). The wrapper is the cell: pin the page.
+      page.style.margin='0';
       page.style.boxShadow='none';page.style.borderRadius='0';
       wrapper.style.transition='none';wrapper.style.margin='0';
       wrapper.style.width=cellW+'px';wrapper.style.height=Math.round(pageH*s)+'px';

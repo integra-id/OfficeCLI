@@ -158,7 +158,7 @@ public partial class PowerPointHandler
         if (masterGetMatch.Success)
         {
             var masterIdx = int.Parse(masterGetMatch.Groups[1].Value);
-            var masters = _doc.PresentationPart?.SlideMasterParts?.ToList() ?? [];
+            var masters = _doc.PresentationPart is { } ppM ? MastersInOrder(ppM) : [];
             if (masterIdx < 1 || masterIdx > masters.Count)
                 throw new ArgumentException($"Slide master {masterIdx} not found (total: {masters.Count})");
             var mp = masters[masterIdx - 1];
@@ -216,7 +216,7 @@ public partial class PowerPointHandler
             {
                 var mIdx = int.Parse(nestedLayoutMatch.Groups[1].Value);
                 var lIdx = int.Parse(nestedLayoutMatch.Groups[2].Value);
-                var masters = _doc.PresentationPart?.SlideMasterParts?.ToList() ?? [];
+                var masters = _doc.PresentationPart is { } ppM ? MastersInOrder(ppM) : [];
                 if (mIdx < 1 || mIdx > masters.Count)
                     throw new ArgumentException($"Slide master {mIdx} not found (total: {masters.Count})");
                 var layouts = LayoutsInOrder(masters[mIdx - 1]);
@@ -296,7 +296,7 @@ public partial class PowerPointHandler
             {
                 var mIdx = int.Parse(nestedMasterShapeGetMatch.Groups[1].Value);
                 var lIdx = int.Parse(nestedMasterShapeGetMatch.Groups[2].Value);
-                var masters = _doc.PresentationPart?.SlideMasterParts?.ToList() ?? [];
+                var masters = _doc.PresentationPart is { } ppM ? MastersInOrder(ppM) : [];
                 if (mIdx < 1 || mIdx > masters.Count)
                     throw new ArgumentException($"Slide master {mIdx} not found (total: {masters.Count})");
                 var layouts = LayoutsInOrder(masters[mIdx - 1]);
@@ -316,7 +316,7 @@ public partial class PowerPointHandler
                 var shapeIdx = int.Parse(masterShapeGetMatch.Groups[3].Value);
                 if (kind == "slidemaster")
                 {
-                    var masters = _doc.PresentationPart?.SlideMasterParts?.ToList() ?? [];
+                    var masters = _doc.PresentationPart is { } ppM ? MastersInOrder(ppM) : [];
                     if (pIdx < 1 || pIdx > masters.Count)
                         throw new ArgumentException($"Slide master {pIdx} not found (total: {masters.Count})");
                     mlShapeTree = masters[pIdx - 1].SlideMaster?.CommonSlideData?.ShapeTree;
@@ -1830,7 +1830,7 @@ public partial class PowerPointHandler
         // Slide master query
         if (rawType == "slidemaster")
         {
-            var masters = _doc.PresentationPart?.SlideMasterParts?.ToList() ?? [];
+            var masters = _doc.PresentationPart is { } ppM ? MastersInOrder(ppM) : [];
             for (int mi = 0; mi < masters.Count; mi++)
             {
                 var mp = masters[mi];

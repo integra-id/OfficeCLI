@@ -105,6 +105,8 @@ public partial class PowerPointHandler
 
         foreach (var element in shapeTree.ChildElements)
         {
+            // <p:cNvPr hidden="1"> — PowerPoint does not draw the shape (issue #466).
+            if (SlideComposition.IsHidden(element)) continue;
             switch (element)
             {
                 case Shape shape:
@@ -199,15 +201,23 @@ public partial class PowerPointHandler
             }
         }
 
+        foreach (var key in SlideComposition.HiddenMetadataSlotKeys(slidePart))
+            slidePlaceholders.Add(key);
+
+        // CONSISTENCY(layer-paint-order): master first, layout second — SVG paints
+        // in document order, so this is what puts master decoration at the bottom
+        // of the stack, the way PowerPoint composes the slide (issue #466,
+        // symptom 3). See PowerPointHandler.HtmlPreview.cs for the HTML twin.
         var layoutPart = slidePart.SlideLayoutPart;
+        var masterPart = layoutPart?.SlideMasterPart;
+
+        if (masterPart != null && SlideComposition.ShowMasterShapes(slidePart))
+            RenderInheritedShapesSvg(sb, defs, ref defId, masterPart.SlideMaster?.CommonSlideData?.ShapeTree,
+                masterPart, slidePlaceholders, themeColors);
+
         if (layoutPart != null)
             RenderInheritedShapesSvg(sb, defs, ref defId, layoutPart.SlideLayout?.CommonSlideData?.ShapeTree,
                 layoutPart, slidePlaceholders, themeColors);
-
-        var masterPart = layoutPart?.SlideMasterPart;
-        if (masterPart != null)
-            RenderInheritedShapesSvg(sb, defs, ref defId, masterPart.SlideMaster?.CommonSlideData?.ShapeTree,
-                masterPart, slidePlaceholders, themeColors);
     }
 
     private void RenderInheritedShapesSvg(StringBuilder sb, StringBuilder defs, ref int defId,
@@ -218,6 +228,10 @@ public partial class PowerPointHandler
 
         foreach (var element in shapeTree.ChildElements)
         {
+            // CONSISTENCY(hidden-gate): a decoration marked hidden stays hidden in the
+            // composition too — <p:cNvPr hidden="1"> means the shape is not drawn,
+            // wherever it lives, so this pass must not paint it onto the slide.
+            if (SlideComposition.IsHidden(element)) continue;
             if (element is not Shape shape) continue;
 
             var ph = shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
@@ -985,6 +999,8 @@ public partial class PowerPointHandler
 
         foreach (var child in grp.ChildElements)
         {
+            // <p:cNvPr hidden="1"> — a hidden member stays hidden inside its group.
+            if (SlideComposition.IsHidden(child)) continue;
             switch (child)
             {
                 case Shape shape:

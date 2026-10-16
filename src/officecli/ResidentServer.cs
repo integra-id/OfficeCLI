@@ -621,7 +621,11 @@ public class ResidentServer : IDisposable
 
             if (request.Command == "__ping__")
             {
-                var response = MakeResponse(0, _filePath, "");
+                // The ack carries this resident's binary version so a client built
+                // from a newer binary (after an in-place auto-update) retires it
+                // instead of talking to a process whose bundle was replaced
+                // underneath it (issue #489).
+                var response = MakeResponse(0, _filePath, Core.UpdateChecker.GetCurrentVersionPublic() ?? "");
                 await WriteLineToPipeAsync(accepted, response, token);
                 return;
             }

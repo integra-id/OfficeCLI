@@ -25,8 +25,14 @@ namespace OfficeCli.Handlers;
 /// This module is the one place that resolves the model; consumers read from
 /// it instead of improvising. Scope of this first extraction: placeholder
 /// slot matching, inherited-frame resolution and its provenance. Later steps
-/// per issue #466: layer paint order, hf/showMasterSp/hidden gates, effective
+/// per issue #466: showMasterSp handling inside the module, effective
 /// fill inheritance.
+///
+/// Visibility gates: a shape marked &lt;p:cNvPr hidden="1"&gt; is not drawn. The
+/// attribute lives on &lt;a:CT_NonVisualDrawingProps&gt;, so it travels with the
+/// shape at every layer of the composition — a hidden master decoration would
+/// otherwise leak onto every slide — and it is not the same bit as the
+/// slide-level &lt;p:sld show="0"&gt; that hides a slide from a show.
 ///
 /// Frame semantics (ECMA-376): &lt;a:xfrm&gt; is ATOMIC. A placeholder either
 /// carries a complete xfrm (owns its frame) or none (inherits the whole frame
@@ -36,6 +42,68 @@ namespace OfficeCli.Handlers;
 /// </summary>
 internal static class SlideComposition
 {
+    // ==================== Visibility Gates ====================
+
+    /// <summary>
+    /// Whether a shape is marked hidden in its own <c>&lt;p:cNvPr hidden="1"&gt;</c>.
+    /// The gate travels with the shape through the whole composition: a hidden
+    /// master or layout decoration must not reach a slide, and a hidden shape on
+    /// the slide itself is just as absent from PowerPoint's output. Consumers
+    /// that paint shapes skip these; consumers that read the model (get/query)
+    /// still see them, because the shape is in the file either way.
+    /// </summary>
+    public static bool IsHidden(OpenXmlElement? element)
+    {
+        var cNvPr = element switch
+        {
+            Shape shape => shape.NonVisualShapeProperties?.NonVisualDrawingProperties,
+            Picture picture => picture.NonVisualPictureProperties?.NonVisualDrawingProperties,
+            ConnectionShape connector => connector.NonVisualConnectionShapeProperties?.NonVisualDrawingProperties,
+            GraphicFrame frame => frame.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties,
+            GroupShape group => group.NonVisualGroupShapeProperties?.NonVisualDrawingProperties,
+            _ => null,
+        };
+        return cNvPr?.Hidden?.Value == true;
+    }
+
+    /// <summary>
+    /// Whether the master's own shapes show on this slide. <c>showMasterSp</c>
+    /// on the slide wins, else the layout's, else shown. A layout authored with
+    /// <c>showMasterSp="0"</c> hides the master decoration on every slide that
+    /// uses it; the master's placeholders and the layout's shapes are unaffected.
+    /// </summary>
+    public static bool ShowMasterShapes(SlidePart slidePart)
+    {
+        var slideFlag = slidePart.Slide?.ShowMasterShapes;
+        if (slideFlag?.HasValue == true) return slideFlag.Value;
+        var layoutFlag = slidePart.SlideLayoutPart?.SlideLayout?.ShowMasterShapes;
+        if (layoutFlag?.HasValue == true) return layoutFlag.Value;
+        return true;
+    }
+
+    // ==================== Header/Footer Gates ====================
+
+    /// <summary>
+    /// The metadata slots (<c>dt</c>, <c>ftr</c>, <c>hdr</c>, <c>sldNum</c>) a slide
+    /// does NOT display, as <c>type:&lt;ph type&gt;</c> skip keys for the inherited
+    /// passes. &lt;p:hf&gt; on the layout overrides the master's; an absent flag
+    /// means shown. The master's footer placeholder holds the footer TEXT, but
+    /// &lt;p:hf ftr="0"/&gt; means "do not display it" — without this gate every
+    /// slide inherited the text. A slide's own metadata shape is not gated: it
+    /// was placed on that slide deliberately.
+    /// </summary>
+    public static IEnumerable<string> HiddenMetadataSlotKeys(SlidePart slidePart)
+    {
+        var layoutHf = slidePart.SlideLayoutPart?.SlideLayout?.GetFirstChild<HeaderFooter>();
+        var masterHf = slidePart.SlideLayoutPart?.SlideMasterPart?.SlideMaster?.GetFirstChild<HeaderFooter>();
+        static bool Shown(BooleanValue? layout, BooleanValue? master)
+            => layout?.HasValue == true ? layout.Value : master?.HasValue != true || master.Value;
+        if (!Shown(layoutHf?.DateTime, masterHf?.DateTime)) yield return "type:dt";
+        if (!Shown(layoutHf?.Footer, masterHf?.Footer)) yield return "type:ftr";
+        if (!Shown(layoutHf?.Header, masterHf?.Header)) yield return "type:hdr";
+        if (!Shown(layoutHf?.SlideNumber, masterHf?.SlideNumber)) yield return "type:sldNum";
+    }
+
     // ==================== Placeholder Slot Matching ====================
 
     /// <summary>
@@ -47,9 +115,15 @@ internal static class SlideComposition
         if (slidePh.Index?.HasValue == true && layoutPh.Index?.HasValue == true)
             return slidePh.Index.Value == layoutPh.Index.Value;
 
-        // Match by type
+        // Match by type — a family counts as the same type. ECMA-376 §19.7.10
+        // spells the title-slide slots `ctrTitle` / `subTitle` in a LAYOUT and
+        // `title` / `body` on the MASTER; each pair is one inheritance slot, and
+        // PowerPoint and LibreOffice resolve the layout spelling through the
+        // master's. Without this a layout's ctrTitle (which carries no idx)
+        // never reaches the master's title placeholder, so that placeholder's
+        // own lstStyle — a cascade layer — is silently skipped.
         if (slidePh.Type?.HasValue == true && layoutPh.Type?.HasValue == true)
-            return slidePh.Type.Value == layoutPh.Type.Value;
+            return SamePlaceholderFamily(slidePh.Type.Value, layoutPh.Type.Value);
 
         // R26-5: slide ph has idx but NO type, layout ph has type but NO idx.
         // OOXML: a <p:ph idx=N/> with no type defaults to type=body, so it
@@ -78,6 +152,34 @@ internal static class SlideComposition
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Whether two placeholder types name the same inheritance slot.
+    ///
+    /// ECMA-376 §19.7.10 spells the title-slide slots differently in the layout
+    /// and on the master: a layout declares &lt;p:ph type="ctrTitle"/&gt; and
+    /// &lt;p:ph type="subTitle" idx="1"/&gt; where the master declares
+    /// &lt;p:ph type="title"/&gt; and &lt;p:ph type="body" idx="1"/&gt;.
+    /// PowerPoint and LibreOffice treat each pair as one slot, so a placeholder
+    /// inherits across the two spellings. This is the same partition the cascade
+    /// already uses to pick a master text style (titleStyle covers
+    /// Title/CenteredTitle, bodyStyle covers Body/SubTitle/Object) — here it
+    /// decides which master placeholder an inheritance step reaches.
+    /// </summary>
+    private static bool SamePlaceholderFamily(PlaceholderValues a, PlaceholderValues b)
+    {
+        if (a == b) return true;
+
+        static bool IsTitleFamily(PlaceholderValues v)
+            => v == PlaceholderValues.Title || v == PlaceholderValues.CenteredTitle;
+
+        // Same partition as the cascade's bodyStyle (Body / SubTitle / Object)
+        // and the idx-only branch above, so one family rule covers all three.
+        static bool IsBodyFamily(PlaceholderValues v)
+            => v == PlaceholderValues.Body || v == PlaceholderValues.SubTitle || v == PlaceholderValues.Object;
+
+        return (IsTitleFamily(a) && IsTitleFamily(b)) || (IsBodyFamily(a) && IsBodyFamily(b));
     }
 
     // ==================== Inherited Frame Resolution ====================

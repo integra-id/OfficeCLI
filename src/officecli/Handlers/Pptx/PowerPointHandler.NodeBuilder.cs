@@ -907,6 +907,9 @@ public partial class PowerPointHandler
             Text = text,
             Preview = string.IsNullOrEmpty(text) ? name : (text.Length > 50 ? text[..50] + "..." : text)
         };
+        // <p:cNvPr hidden="1"> — the renderers skip it (SlideComposition.IsHidden);
+        // surface the same bit here so a reader knows why it is absent from the preview.
+        if (SlideComposition.IsHidden(shape)) node.Format["hidden"] = true;
 
         node.Format["name"] = name;
         if (phTypeStr != null) node.Format["phType"] = phTypeStr;
@@ -2616,6 +2619,9 @@ public partial class PowerPointHandler
             Type = mediaType,
             Preview = name
         };
+        // <p:cNvPr hidden="1"> — the renderers skip it (SlideComposition.IsHidden);
+        // surface the same bit here so a reader knows why it is absent from the preview.
+        if (SlideComposition.IsHidden(pic)) node.Format["hidden"] = true;
 
         node.Format["name"] = name;
         var picId = GetCNvPrId(pic);
@@ -3194,6 +3200,9 @@ public partial class PowerPointHandler
             Type = "connector",
             Preview = name
         };
+        // <p:cNvPr hidden="1"> — the renderers skip it (SlideComposition.IsHidden);
+        // surface the same bit here so a reader knows why it is absent from the preview.
+        if (SlideComposition.IsHidden(cxn)) node.Format["hidden"] = true;
         node.Format["name"] = name;
         var cxnId = GetCNvPrId(cxn);
         if (cxnId.HasValue) node.Format["id"] = cxnId.Value;

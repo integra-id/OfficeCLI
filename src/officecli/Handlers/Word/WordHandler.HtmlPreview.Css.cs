@@ -799,7 +799,19 @@ public partial class WordHandler
 
                     double fontHeightPt = gSizePt * gRatio;
                     double fontFloorPt = Math.Ceiling(fontHeightPt / gridPitchPt) * gridPitchPt;
-                    double snappedPt = Math.Max(fontFloorPt, lineMult * gridPitchPt);
+                    double snappedPt;
+                    // Measured in Word on a 312-twip grid: an "exact" value is used
+                    // as-is (20pt stays 20pt), "atLeast" is the value floored by the
+                    // grid line the font occupies (10pt -> 15.6pt, 20pt -> 20pt);
+                    // neither is rounded to whole grid lines.
+                    if ((gRule == "exact" || gRule == "atLeast")
+                        && int.TryParse(gLineVal, out var gFixedTwips) && gFixedTwips > 0)
+                    {
+                        double fixedPt = gFixedTwips / 20.0;
+                        snappedPt = gRule == "exact" ? fixedPt : Math.Max(fixedPt, fontFloorPt);
+                    }
+                    else
+                        snappedPt = Math.Max(fontFloorPt, lineMult * gridPitchPt);
                     parts.RemoveAll(p => p.StartsWith("line-height"));
                     parts.Add($"line-height:{snappedPt:0.##}pt");
                 }

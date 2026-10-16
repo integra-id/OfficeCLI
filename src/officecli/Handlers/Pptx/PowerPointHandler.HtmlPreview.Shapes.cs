@@ -2304,6 +2304,8 @@ public partial class PowerPointHandler
 
         foreach (var child in grp.ChildElements)
         {
+            // <p:cNvPr hidden="1"> — a hidden member stays hidden inside its group.
+            if (SlideComposition.IsHidden(child)) continue;
             switch (child)
             {
                 case Shape shape:
@@ -2508,6 +2510,8 @@ public partial class PowerPointHandler
 
         foreach (var child in grp.ChildElements)
         {
+            // <p:cNvPr hidden="1"> — a hidden member stays hidden inside its group.
+            if (SlideComposition.IsHidden(child)) continue;
             switch (child)
             {
                 case Shape shape:
