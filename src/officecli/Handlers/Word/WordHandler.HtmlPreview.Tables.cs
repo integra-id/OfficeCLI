@@ -609,6 +609,17 @@ public partial class WordHandler
                         CloseCellList();
                         var text = GetParagraphText(cellPara);
                         var pCss = GetParagraphInlineCss(cellPara);
+                        // A wrapNone picture anchored to this paragraph must use
+                        // the paragraph as its containing block. The cell is
+                        // also position:relative (CellAnchorsSubParagraphShape)
+                        // so checkbox shapes keep resolving against the cell;
+                        // without relative on THIS div a paragraph-relative
+                        // picture in a later paragraph of a multi-paragraph
+                        // cell is pinned to the cell top. Shapes stay on the
+                        // cell (a relative paragraph div whose only in-flow
+                        // content is wrapped text collapsed those rows).
+                        if (ParagraphAnchorsParagraphRelativePicture(cellPara))
+                            pCss = string.IsNullOrEmpty(pCss) ? "position:relative" : pCss + ";position:relative";
                         sb.Append("<div");
                         if (!string.IsNullOrEmpty(pCss))
                             sb.Append($" style=\"{pCss}\"");
