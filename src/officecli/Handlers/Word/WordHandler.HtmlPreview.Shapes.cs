@@ -285,12 +285,33 @@ public partial class WordHandler
                 // wrapNone → image floats over (or under) the text rather than
                 // wrapping it. behindDoc="1" paints behind the body text like a
                 // watermark (negative z-index); behindDoc="0" paints on top
-                // (positive z-index). Either way the image is absolutely
-                // positioned relative to the .page box (which is position:relative)
-                // at the anchored hPosition/vPosition, so the text column flows
-                // independently and visually overlaps the image — matching Word.
+                // (positive z-index).
+                //
+                // A paragraph/line-relative anchor (the usual "picture sits
+                // here, beside this paragraph" floating drawing) must be
+                // positioned from THAT paragraph. RenderWrapNoneOverlayImage
+                // resolves against .page / .doc-header and treats a non-page
+                // vertical offset as distance from the top margin, which pins
+                // the picture to the top of the page. Shapes already take the
+                // paragraph path (ComputeParagraphAnchorAbsoluteCss); pictures
+                // with the same anchor geometry do too. The host paragraph is
+                // position:relative (ParagraphAnchorsSubParagraphShape).
                 if (anchor.Elements().Any(e => e.LocalName == "wrapNone"))
                 {
+                    var paraAbsCss = ComputeParagraphAnchorAbsoluteCss(drawing);
+                    if (paraAbsCss != null)
+                    {
+                        var sizeCss = "";
+                        if (widthPx > 0) sizeCss += $";width:{widthPx}px;max-width:none";
+                        if (heightPx > 0) sizeCss += $";height:{heightPx}px";
+                        var anchoredStyle = paraAbsCss + sizeCss;
+                        var anchoredCrop = GetCropPercents(drawing);
+                        if (anchoredCrop.HasValue)
+                            RenderCroppedImage(sb, dataUri, widthPx, heightPx, anchoredCrop.Value.l, anchoredCrop.Value.t, anchoredCrop.Value.r, anchoredCrop.Value.b, HtmlEncodeAttr(alt), anchoredStyle);
+                        else
+                            sb.Append($"<img src=\"{dataUri}\" alt=\"{HtmlEncodeAttr(alt)}\"{widthAttr}{heightAttr} style=\"{anchoredStyle}\">");
+                        return;
+                    }
                     RenderWrapNoneOverlayImage(sb, drawing, anchor, dataUri, alt, widthPx, heightPx);
                     return;
                 }
@@ -443,10 +464,17 @@ public partial class WordHandler
     /// the body text flows independently of it. behindDoc="1" paints the image
     /// behind the text (negative z-index, watermark-style); behindDoc="0" paints
     /// it on top (positive z-index). Position is computed from the anchor's
-    /// hPosition/vPosition offsets relative to the .page box (position:relative).
-    /// margin/column/paragraph offsets are measured from the page content edge,
-    /// so the page margins are added; page-relative offsets are absolute from
-    /// the physical page edge (= the .page padding-box origin).
+    /// hPosition/vPosition offsets relative to the .page box (position:relative),
+    /// or to the header/footer band when the drawing lives there.
+    /// Paragraph/line anchors whose horizontal origin is the column (or an
+    /// align across the column) are handled earlier, by
+    /// ComputeParagraphAnchorAbsoluteCss, so the offset is from the anchor
+    /// paragraph. What remains is page/margin-relative placement: non-page
+    /// offsets are measured from the page content edge (the page margins are
+    /// added); page-relative offsets are absolute from the physical page edge
+    /// (= the .page padding-box origin). In a header or footer the band is
+    /// already inset by the left margin, so a page-relative horizontal offset
+    /// subtracts that inset.
     /// </summary>
     private void RenderWrapNoneOverlayImage(StringBuilder sb, Drawing drawing, DW.Anchor anchor,
         string dataUri, string alt, long widthPx, long heightPx)
@@ -515,9 +543,22 @@ public partial class WordHandler
         }
         else if (hOffEl != null && long.TryParse(hOffEl.InnerText, out var hOffEmu))
         {
-            leftPt = hFrom == DW.HorizontalRelativePositionValues.Page
-                ? hOffEmu / EmuConverter.EmuPerPointF
-                : leftBase + hOffEmu / EmuConverter.EmuPerPointF;
+            var offPt = hOffEmu / EmuConverter.EmuPerPointF;
+            if (hFrom == DW.HorizontalRelativePositionValues.Page)
+            {
+                // posOffset is from the physical page edge. A body overlay's
+                // containing block is .page, whose padding edge IS that edge,
+                // so the offset is used as-is. A header/footer overlay's
+                // containing block is .doc-header/.doc-footer, which is already
+                // inset by the left margin (see .doc-header { left: margin }).
+                // The <wp:align> branch above already shifts page-relative
+                // alignment by -marginLeft in a header; posOffset must do the
+                // same or a page-anchored letterhead is pushed right by the
+                // margin and clipped at the page edge.
+                leftPt = inHeaderFooter ? offPt - pg.MarginLeftPt : offPt;
+            }
+            else
+                leftPt = leftBase + offPt;
         }
 
         double topPt = topBase;
@@ -910,7 +951,14 @@ public partial class WordHandler
     {
         foreach (var drawing in para.Descendants<Drawing>())
         {
-            if (!drawing.Descendants().Any(e => e.LocalName == "wsp"))
+            // Shapes (wsp, including those nested in a wpg group) and
+            // standalone pictures. A group that only wraps pictures is left
+            // alone: RenderGroupHtml paints it in flow, not with the
+            // paragraph-absolute CSS below.
+            bool isGroup = drawing.Descendants().Any(e => e.LocalName == "wgp");
+            bool isShape = drawing.Descendants().Any(e => e.LocalName == "wsp");
+            bool isPicture = !isGroup && drawing.Descendants().Any(e => e.LocalName == "pic");
+            if (!isShape && !isPicture)
                 continue;
             // A full-page-size shape is rendered as a page-background fill
             // (RenderDrawingHtml line ~178) whose width/height:100% must resolve
@@ -918,6 +966,31 @@ public partial class WordHandler
             // position:relative for it, that 100% would collapse onto the single
             // paragraph box (a ~478×448px sliver) instead of covering the page.
             // Such shapes get NO per-paragraph relative containing block.
+            // Full-page pictures take the same page-fill path in RenderImageHtml.
+            var extent = drawing.Descendants<DW.Extent>().FirstOrDefault();
+            if (extent != null && IsFullPageSize(extent.Cx?.Value ?? 0, extent.Cy?.Value ?? 0))
+                continue;
+            if (ComputeParagraphAnchorAbsoluteCss(drawing) != null)
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// True when the paragraph anchors a wrapNone picture (not a shape or
+    /// group) that ComputeParagraphAnchorAbsoluteCss positions from the
+    /// paragraph. Table cells use this to mark that paragraph div
+    /// position:relative. Shapes stay on the cell: a relative paragraph div
+    /// inside a cell collapsed row height for the checkbox-overlay case.
+    /// </summary>
+    private bool ParagraphAnchorsParagraphRelativePicture(Paragraph para)
+    {
+        foreach (var drawing in para.Descendants<Drawing>())
+        {
+            if (drawing.Descendants().Any(e => e.LocalName is "wsp" or "wgp"))
+                continue;
+            if (!drawing.Descendants().Any(e => e.LocalName == "pic"))
+                continue;
             var extent = drawing.Descendants<DW.Extent>().FirstOrDefault();
             if (extent != null && IsFullPageSize(extent.Cx?.Value ?? 0, extent.Cy?.Value ?? 0))
                 continue;
