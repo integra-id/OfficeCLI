@@ -529,6 +529,16 @@ public partial class ExcelHandler : IDocumentHandler, Rendering.IRenderModelHost
     /// atomic-batch rollback: drop the in-memory DOM without serializing.</summary>
     public bool DiscardOnDispose { get; set; }
 
+    // #493: the final write-back used to be `catch { }` "best-effort: the
+    // original file is left intact". The file was intact, but the session's
+    // edits were silently gone — every non-resident add/set/remove reported
+    // success with exit 0, and a resident close reported a clean shutdown,
+    // whenever the save could not land (read-only directory, a sandboxed
+    // token on which ReplaceFile is denied, …). Resources are still released;
+    // the failure is then surfaced, but only when there were edits to lose.
+    private static IOException SaveFailed(string path, Exception inner) =>
+        new($"Could not save changes to {path}: {inner.Message} The file on disk is unchanged; the edits were not written.", inner);
+
     public void Dispose()
     {
         if (_disposed) return;
@@ -576,12 +586,14 @@ public partial class ExcelHandler : IDocumentHandler, Rendering.IRenderModelHost
         // may close the stream it was opened over during _doc.Dispose().
         // After _doc.Save() the in-memory zip is complete (same contract
         // the direct FileStream path relies on for mid-session saves).
-        try { WriteBackFilteredPackage(); } catch { /* best-effort */ }
+        Exception? writeError = null;
+        try { WriteBackFilteredPackage(); } catch (Exception ex) { writeError = ex; }
         _doc.Dispose();
         _filteredPackageStream?.Dispose();
         _filteredPackageStream = null;
         _backingStream?.Dispose();
         _backingStream = null;
+        if (writeError != null && Modified) throw SaveFailed(_filePath, writeError);
     }
 
 }

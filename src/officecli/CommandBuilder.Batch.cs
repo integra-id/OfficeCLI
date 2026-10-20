@@ -23,6 +23,9 @@ static partial class CommandBuilder
         + "\"path\" (set/remove/get target), \"selector\" (query filter; \"path\" is accepted as an alias), \"type\" (element type for add), "
         + "\"props\" (a key->value map of --prop values), \"to\"/\"after\"/\"before\" (move), "
         + "\"path2\" (swap's second path).\n\n"
+        + "A query item also takes its own output options as fields: \"compact\" (true = one line per element, "
+        + "the same format as `query --compact`) and \"fields\" (extra k=v columns, only with compact). "
+        + "A read item does not read \"props\" — putting an option there warns and the option is ignored.\n\n"
         + "Pass the array via --commands, or as the same JSON on stdin / --input <file>. Example:\n"
         + "[\n"
         + "  {\"command\":\"add\",\"parent\":\"/slide[1]\",\"type\":\"shape\",\"props\":{\"text\":\"Hi\",\"x\":\"1cm\",\"y\":\"2cm\"}},\n"
@@ -628,7 +631,7 @@ static partial class CommandBuilder
                     // temp copy must not leak on that path.
                     try
                     {
-                        System.IO.File.Replace(tmpPath, targetPath, destinationBackupFileName: null);
+                        OfficeCli.Core.AtomicPackageWriter.ReplaceFile(tmpPath, targetPath);
                     }
                     catch
                     {

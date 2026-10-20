@@ -142,6 +142,7 @@ static partial class CommandBuilder
             // Release any running resident's file lock before direct-open (import bypasses resident)
             ResidentClient.SendClose(file.FullName);
             using var handler = new OfficeCli.Handlers.ExcelHandler(file.FullName, editable: true);
+            using var deferredOut = OfficeCli.Core.DeferredStdout.Begin(handler); // #493: print only after the save lands
             var msg = handler.Import(parentPath, csvContent, delimiter, header, startCell, decimalSeparator);
             if (json)
                 Console.WriteLine(OutputFormatter.WrapEnvelopeText(msg));

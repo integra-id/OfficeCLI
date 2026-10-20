@@ -100,6 +100,8 @@ internal class BatchItemConverter : JsonConverter<BatchItem>
                 case "selector": item.Selector = reader.GetString(); break;
                 case "text": item.Text = reader.GetString(); break;
                 case "mode": item.Mode = reader.GetString(); break;
+                case "compact": item.Compact = reader.TokenType == JsonTokenType.Null ? null : reader.GetBoolean(); break;
+                case "fields": item.Fields = reader.GetString(); break;
                 case "depth": item.Depth = reader.TokenType == JsonTokenType.Null ? null : reader.GetInt32(); break;
                 case "part": item.Part = reader.GetString(); break;
                 case "xpath": item.Xpath = reader.GetString(); break;
@@ -129,6 +131,8 @@ internal class BatchItemConverter : JsonConverter<BatchItem>
         if (value.Selector != null) writer.WriteString("selector", value.Selector);
         if (value.Text != null) writer.WriteString("text", value.Text);
         if (value.Mode != null) writer.WriteString("mode", value.Mode);
+        if (value.Compact.HasValue) writer.WriteBoolean("compact", value.Compact.Value);
+        if (value.Fields != null) writer.WriteString("fields", value.Fields);
         if (value.Depth.HasValue) writer.WriteNumber("depth", value.Depth.Value);
         if (value.Part != null) writer.WriteString("part", value.Part);
         if (value.Xpath != null) writer.WriteString("xpath", value.Xpath);
@@ -160,6 +164,22 @@ public class BatchItem
     public string? Selector { get; set; }
     public string? Text { get; set; }
     public string? Mode { get; set; }
+    // Read-output options of the item's own verb, mirroring the CLI flags of
+    // the same name: `query --compact` / `query --fields x,y`. They are
+    // siblings of `selector` for the same reason `selector` is a sibling of
+    // `path`: a read item's arguments are fields, and the verbose form of a
+    // read is what costs a `batch`-only caller its context window (measured on
+    // a two-slide deck: `query placeholder` answers 2365 bytes as a JSON tree
+    // and 205 as compact lines). Absent = the command's own default, so a batch
+    // that sets neither keeps its previous output byte for byte.
+    //
+    // CONSISTENCY(batch-read-options): mirrored by the reader/writer cases
+    // above, KnownFields below, ToResidentRequest, and the `query` case in
+    // ExecuteBatchItem. The verbs that grow more options should extend THIS
+    // list rather than each inventing its own container — see issue #522 and
+    // PR #286 (an `options` object) for the shape that discussion is heading.
+    public bool? Compact { get; set; }
+    public string? Fields { get; set; }
     public int? Depth { get; set; }
     public string? Part { get; set; }
     public string? Xpath { get; set; }
@@ -178,7 +198,7 @@ public class BatchItem
     internal static readonly HashSet<string> KnownFields = new(StringComparer.OrdinalIgnoreCase)
     {
         "command", "op", "path", "parent", "type", "from", "index", "after", "before", "to", "path2",
-        "props", "selector", "text", "mode", "depth", "part", "xpath", "action", "xml", "dumpversion"
+        "props", "selector", "text", "mode", "compact", "fields", "depth", "part", "xpath", "action", "xml", "dumpversion"
     };
 
     public ResidentRequest ToResidentRequest()
@@ -197,6 +217,8 @@ public class BatchItem
         if (Selector != null) req.Args["selector"] = Selector;
         if (Text != null) req.Args["text"] = Text;
         if (Mode != null) req.Args["mode"] = Mode;
+        if (Compact == true) req.Args["compact"] = "true";
+        if (Fields != null) req.Args["fields"] = Fields;
         if (Depth.HasValue) req.Args["depth"] = Depth.Value.ToString();
         if (Part != null) req.Args["part"] = Part;
         if (Xpath != null) req.Args["xpath"] = Xpath;

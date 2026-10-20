@@ -91,6 +91,7 @@ static partial class CommandBuilder
             }, json) is {} rc) return rc;
 
             using var handler = DocumentHandlerFactory.Open(file.FullName, editable: true);
+            using var deferredOut = OfficeCli.Core.DeferredStdout.Begin(handler); // #493: print only after the save lands
             var errorsBefore = handler.Validate().Select(e => e.Description).ToHashSet();
             handler.RawSet(partPath, xpath, action, xml);
             var warnings = ReportNewErrorsAsWarnings(handler, errorsBefore);
@@ -139,6 +140,7 @@ static partial class CommandBuilder
             }, json) is {} rc) return rc;
 
             using var handler = DocumentHandlerFactory.Open(file, editable: true);
+            using var deferredOut = OfficeCli.Core.DeferredStdout.Begin(handler); // #493: print only after the save lands
             var errorsBefore = handler.Validate().Select(e => e.Description).ToHashSet();
             var (relId, partPath) = handler.AddPart(parent, type);
             var warnings = ReportNewErrorsAsWarnings(handler, errorsBefore);

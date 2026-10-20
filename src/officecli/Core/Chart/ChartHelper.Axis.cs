@@ -16,6 +16,41 @@ internal static partial class ChartHelper
     // Per schemas/help/pptx/chart-axis.json. Shared across Pptx / Word / Excel handlers.
 
     /// <summary>
+    /// A scatter / bubble plot area: no category or date axis, two (or more)
+    /// value axes — the horizontal one carries X, the vertical one Y.
+    /// </summary>
+    private static bool IsXyPlotArea(C.PlotArea plotArea) =>
+        !plotArea.Elements<C.CategoryAxis>().Any()
+        && !plotArea.Elements<C.DateAxis>().Any()
+        && plotArea.Elements<C.ValueAxis>().Skip(1).Any();
+
+    private static bool IsVerticalAxis(C.ValueAxis axis)
+    {
+        var pos = axis.GetFirstChild<C.AxisPosition>()?.Val;
+        return pos?.HasValue == true
+            && (pos.Value == C.AxisPositionValues.Left || pos.Value == C.AxisPositionValues.Right);
+    }
+
+    /// <summary>
+    /// The primary VALUE axis — the target of the chart-level axisMin / axisMax /
+    /// axisNumFmt / majorUnit / gridlines / axisTitle shortcuts and of
+    /// axis[@role=value]. On every chart with a category (or date) axis it is
+    /// the first valAx, as before. On a scatter / bubble chart both axes are
+    /// valAx and the FIRST one is the horizontal X axis, so "first valAx" put a
+    /// value-axis bound on X and the plot came out blank (#502); there it is the
+    /// first VERTICAL valAx (Y), matching what Excel and PowerPoint call the
+    /// value axis.
+    /// </summary>
+    internal static C.ValueAxis? PrimaryValueAxis(C.PlotArea? plotArea)
+    {
+        if (plotArea == null) return null;
+        if (IsXyPlotArea(plotArea))
+            return plotArea.Elements<C.ValueAxis>().FirstOrDefault(IsVerticalAxis)
+                ?? plotArea.Elements<C.ValueAxis>().FirstOrDefault();
+        return plotArea.Elements<C.ValueAxis>().FirstOrDefault();
+    }
+
+    /// <summary>
     /// Locate the C.* axis element in the plot area corresponding to the given role.
     /// Returns null if not present.
     /// </summary>
@@ -25,11 +60,16 @@ internal static partial class ChartHelper
         {
             case "category":
                 return (OpenXmlElement?)plotArea.Elements<C.CategoryAxis>().FirstOrDefault()
-                    ?? plotArea.Elements<C.DateAxis>().FirstOrDefault();
+                    ?? (OpenXmlElement?)plotArea.Elements<C.DateAxis>().FirstOrDefault()
+                    ?? (IsXyPlotArea(plotArea)
+                        ? plotArea.Elements<C.ValueAxis>().FirstOrDefault(a => !IsVerticalAxis(a))
+                        : null);
             case "value":
-                return plotArea.Elements<C.ValueAxis>().FirstOrDefault();
+                return PrimaryValueAxis(plotArea);
             case "value2":
-                return plotArea.Elements<C.ValueAxis>().Skip(1).FirstOrDefault();
+                return IsXyPlotArea(plotArea)
+                    ? plotArea.Elements<C.ValueAxis>().Where(IsVerticalAxis).Skip(1).FirstOrDefault()
+                    : plotArea.Elements<C.ValueAxis>().Skip(1).FirstOrDefault();
             case "series":
                 return plotArea.Elements<C.SeriesAxis>().FirstOrDefault();
             default:
@@ -217,10 +257,27 @@ internal static partial class ChartHelper
         var chart = chartPart.ChartSpace?.GetFirstChild<C.Chart>();
         var plotArea = chart?.GetFirstChild<C.PlotArea>();
         var targetAxis = plotArea != null ? FindAxisByRole(plotArea, normalizedRole) : null;
+        // The path names an axis the chart does not have (axis[@role=value2]
+        // on a single-axis chart, …). Get already reports it as not found; Set
+        // used to fall back to the chart-level shortcuts, which always target
+        // the PRIMARY value axis, and reported success while rewriting it.
+        if (plotArea != null && targetAxis == null)
+            throw new ArgumentException($"Axis with role '{normalizedRole}' not found on this chart.");
 
         foreach (var (key, value) in properties)
         {
-            var lower = key.ToLowerInvariant();
+            // #503: the chart-level shortcuts axisMin / axisMax / axisNumFmt /
+            // axisNumberFormat name the path axis's own min / max / format.
+            // Unrecognised here, they fell through to the chart-level setter,
+            // which always targets the PRIMARY value axis — so on an
+            // axis[@role=value2] path they silently rewrote the other axis.
+            var lower = key.ToLowerInvariant() switch
+            {
+                "axismin" => "min",
+                "axismax" => "max",
+                "axisnumfmt" or "axisnumberformat" => "format",
+                var k => k,
+            };
             switch (lower)
             {
                 case "title":

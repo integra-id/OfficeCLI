@@ -159,6 +159,7 @@ static partial class CommandBuilder
                 }, json) is {} rc) return rc != 0 ? rc : (hadWarnings ? 2 : 0);
 
                 using var handler = DocumentHandlerFactory.Open(file.FullName, editable: true);
+                using var deferredOut = OfficeCli.Core.DeferredStdout.Begin(handler); // #493: print only after the save lands
                 var oldCount = (handler as OfficeCli.Handlers.PowerPointHandler)?.GetSlideCount() ?? 0;
                 var resultPath = handler.CopyFrom(from, parentPath, position);
                 var message = $"Copied to {resultPath}";
@@ -198,6 +199,7 @@ static partial class CommandBuilder
                 // in ResidentServer.ExecuteAdd.
                 var tracking = new OfficeCli.Core.TrackingPropertyDictionary(properties);
                 using var handler = DocumentHandlerFactory.Open(file.FullName, editable: true);
+                using var deferredOut = OfficeCli.Core.DeferredStdout.Begin(handler); // #493: print only after the save lands
                 var oldCount = (handler as OfficeCli.Handlers.PowerPointHandler)?.GetSlideCount() ?? 0;
                 var resultPath = handler.Add(parentPath, type!, position, tracking);
                 var unsupported = tracking.UnusedKeys.ToList();
@@ -378,6 +380,7 @@ static partial class CommandBuilder
             }, json) is {} rc) return rc;
 
             using var handler = DocumentHandlerFactory.Open(file.FullName, editable: true);
+            using var deferredOut = OfficeCli.Core.DeferredStdout.Begin(handler); // #493: print only after the save lands
             var oldCount = (handler as OfficeCli.Handlers.PowerPointHandler)?.GetSlideCount() ?? 0;
             string? warning;
             if (!string.IsNullOrEmpty(shift))
@@ -472,6 +475,7 @@ static partial class CommandBuilder
             }, json) is {} rc) return rc;
 
             using var handler = DocumentHandlerFactory.Open(file.FullName, editable: true);
+            using var deferredOut = OfficeCli.Core.DeferredStdout.Begin(handler); // #493: print only after the save lands
             var resultPath = handler.Move(path, to, position, moveProps.Count > 0 ? moveProps : null);
             var message = $"Moved to {resultPath}";
             if (json) Console.WriteLine(OutputFormatter.WrapEnvelopeText(message));
@@ -509,6 +513,7 @@ static partial class CommandBuilder
             }, json) is {} rc) return rc;
 
             using var handler = DocumentHandlerFactory.Open(file.FullName, editable: true);
+            using var deferredOut = OfficeCli.Core.DeferredStdout.Begin(handler); // #493: print only after the save lands
             var (p1, p2) = handler switch
             {
                 OfficeCli.Handlers.PowerPointHandler ppt => ppt.Swap(path1, path2),

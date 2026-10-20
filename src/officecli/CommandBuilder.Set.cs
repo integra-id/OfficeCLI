@@ -224,6 +224,7 @@ static partial class CommandBuilder
             var properties = ParsePropsArray(props);
 
             using var handler = DocumentHandlerFactory.Open(file.FullName, editable: true);
+            using var deferredOut = OfficeCli.Core.DeferredStdout.Begin(handler); // #493: print only after the save lands
 
             // Scope the unsupported-prop fuzzy-suggestion pool by handler type
             // so e.g. Excel pivot errors don't suggest PPTX-only keys like

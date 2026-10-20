@@ -1421,6 +1421,13 @@ internal static partial class ChartHelper
     /// </summary>
     internal static void InsertChartGroupDLbls(OpenXmlElement chartGroup, C.DataLabels dLbls)
     {
+        // In every chart-group type (CT_BarChart, CT_LineChart, CT_PieChart,
+        // CT_ScatterChart, …) dLbls? immediately follows ser*. Anchor on the
+        // last series: the before-anchor chain below missed CT_LineChart's
+        // group-level <c:smooth>, so a later `set dataLabels` on a line chart
+        // landed dLbls after smooth — schema-invalid (#498).
+        var lastSer = chartGroup.ChildElements.LastOrDefault(e => e.LocalName == "ser");
+        if (lastSer != null) { lastSer.InsertAfterSelf(dLbls); return; }
         var anchor = chartGroup.GetFirstChild<C.DropLines>() as OpenXmlElement
             ?? chartGroup.GetFirstChild<C.HighLowLines>() as OpenXmlElement
             ?? chartGroup.GetFirstChild<C.UpDownBars>() as OpenXmlElement

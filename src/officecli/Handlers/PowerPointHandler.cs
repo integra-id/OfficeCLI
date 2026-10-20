@@ -2386,8 +2386,24 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
     /// atomic-batch rollback: drop the in-memory DOM without serializing.</summary>
     public bool DiscardOnDispose { get; set; }
 
+    // #493: the final write-back used to be `catch { }` "best-effort: the
+    // original file is left intact". The file was intact, but the session's
+    // edits were silently gone — every non-resident add/set/remove reported
+    // success with exit 0, and a resident close reported a clean shutdown,
+    // whenever the save could not land (read-only directory, a sandboxed
+    // token on which ReplaceFile is denied, …). Resources are still released;
+    // the failure is then surfaced, but only when there were edits to lose.
+    private static IOException SaveFailed(string path, Exception inner) =>
+        new($"Could not save changes to {path}: {inner.Message} The file on disk is unchanged; the edits were not written.", inner);
+
+    // Dispose is idempotent: DeferredStdout disposes the handler to commit the
+    // save before a command prints, and the command's `using` disposes it again.
+    private bool _disposeDone;
+
     public void Dispose()
     {
+        if (_disposeDone) return;
+        _disposeDone = true;
         if (DiscardOnDispose)
         {
             // Atomic-batch rollback: never serialize the poisoned DOM. Close
@@ -2414,12 +2430,14 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
             // Editable: read the in-memory package into the atomic temp BEFORE
             // _doc.Dispose() (the SDK may close the stream it was opened over on
             // dispose), then swap it over the original in one File.Replace.
-            try { AtomicWriteBack(); } catch { /* best-effort: original left intact */ }
+            Exception? writeError = null;
+            try { AtomicWriteBack(); } catch (Exception ex) { writeError = ex; }
             _doc.Dispose();
             _packageStream.Dispose();
             _packageStream = null;
             _backingStream?.Dispose();
             _backingStream = null;
+            if (writeError != null && Modified) throw SaveFailed(_filePath, writeError);
         }
         else
         {

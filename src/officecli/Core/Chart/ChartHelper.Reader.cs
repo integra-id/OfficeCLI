@@ -456,7 +456,7 @@ internal static partial class ChartHelper
         }
 
         // Gridlines: "true" for presence, detail in gridlineColor/gridlineWidth/gridlineDash
-        var valAxisForGrid = plotArea.GetFirstChild<C.ValueAxis>();
+        var valAxisForGrid = PrimaryValueAxis(plotArea);
         var majorGL = valAxisForGrid?.GetFirstChild<C.MajorGridlines>();
         if (majorGL != null)
         {
@@ -671,7 +671,7 @@ internal static partial class ChartHelper
         // hard-codes the run to 14pt bold, so a source axis title sized only on
         // its defRPr (e.g. sz=800 b=0) rebuilt oversized and bold. The .pPr key
         // carries the source styling so the replay restores it.
-        var valAxis = plotArea.GetFirstChild<C.ValueAxis>();
+        var valAxis = PrimaryValueAxis(plotArea);
         var valAxisTitleEl = valAxis?.GetFirstChild<C.Title>();
         var valAxisTitle = valAxisTitleEl?.Descendants<Drawing.Text>().FirstOrDefault()?.Text;
         if (valAxisTitle != null)

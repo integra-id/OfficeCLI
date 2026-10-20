@@ -968,12 +968,51 @@ static partial class CommandBuilder
         if (ContainsNullByte(item.Text))
             throw new CliException($"text contains a NUL byte (\\u0000), which is invalid in OOXML.")
                 { Code = "invalid_input" };
+        if (ContainsNullByte(item.Fields))
+            throw new CliException($"fields contains a NUL byte (\\u0000), which is invalid in OOXML.")
+                { Code = "invalid_input" };
         foreach (var (pk, pv) in props)
         {
             if (ContainsNullByte(pk) || ContainsNullByte(pv))
                 throw new CliException($"prop '{pk}' contains a NUL byte (\\u0000), which is invalid in OOXML.")
                     { Code = "invalid_input" };
         }
+
+        // A read verb consumes no props at all. A caller who wrote an output
+        // option there — {"command":"query","props":{"compact":"true"}} — used
+        // to get the full payload back with no diagnostic whatsoever, which is
+        // the shape of the mistake that costs the most context precisely where
+        // a batch-only caller cannot see it (issue #522). Warn, never fail: the
+        // item's previous behaviour (full output) is what the caller falls back
+        // to, and the batch may already be mid-run.
+        var readVerb = item.Command.ToLowerInvariant();
+        if (readVerb is "get" or "query" or "view" && item.Props is { Count: > 0 } ignoredProps)
+        {
+            var ignoredKeys = string.Join(", ", ignoredProps.Keys.Select(k => $"\"{k}\""));
+            var hint = readVerb switch
+            {
+                "query" => "Put the output options on the item itself: \"compact\": true, \"fields\": \"x,y\".",
+                "view" => "A bounded view (start/end/max-lines/cols/range) is not available inside a batch yet — run `view` as its own command.",
+                _ => "A get item takes \"path\" and \"depth\" only.",
+            };
+            OfficeCli.Core.WarningContext.Add(
+                $"'{item.Command}' ignores props ({ignoredKeys}): a read item takes no props. {hint}",
+                "unsupported_property",
+                hint);
+        }
+
+        // `compact` and `fields` are QUERY options. On any other verb they used
+        // to be rejected as an unknown field — blunt, but it told the caller.
+        // Now that they parse, ignoring them there would be a fresh silent drop
+        // of exactly the kind this change exists to remove, so name them.
+        var misplacedReadOptions = new List<string>();
+        if (item.Compact.HasValue) misplacedReadOptions.Add("\"compact\"");
+        if (item.Fields != null) misplacedReadOptions.Add("\"fields\"");
+        if (misplacedReadOptions.Count > 0 && readVerb != "query")
+            OfficeCli.Core.WarningContext.Add(
+                $"'{item.Command}' does not read {string.Join(" or ", misplacedReadOptions)}: they are query-item options. Ignored.",
+                "unsupported_property",
+                "Put them on the item that reads them: {\"command\":\"query\",\"selector\":\"...\",\"compact\":true}.");
 
         switch (item.Command.ToLowerInvariant())
         {
@@ -1020,6 +1059,16 @@ static partial class CommandBuilder
                     // MatchesTextFilter (not plain Contains) so a batch query
                     // text filter honours r"regex" like the CLI and resident do.
                     results = results.Where(n => n.Text != null && OfficeCli.Core.AttributeFilter.MatchesTextFilter(n.Text, textFilter)).ToList();
+                // --compact: the same renderer the standalone command and the
+                // resident use, so the three cannot drift — the line format is a
+                // stability contract, not a per-surface layout (issue #522).
+                // `fields` only means something alongside compact, exactly as in
+                // `query --compact --fields x,y`; there it is ignored without it.
+                if (item.Compact == true)
+                {
+                    foreach (var w in warnings) Console.Error.WriteLine(w.Message);
+                    return FormatNodesCompact(handler, results, item.Fields);
+                }
                 foreach (var w in warnings) Console.Error.WriteLine(w.Message);
                 return OfficeCli.Core.OutputFormatter.FormatNodes(results, format);
             }

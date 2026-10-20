@@ -959,7 +959,7 @@ internal static partial class ChartHelper
                 case "axistitle" or "vtitle":
                 {
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
-                    var valAxis = plotArea2?.GetFirstChild<C.ValueAxis>();
+                    var valAxis = PrimaryValueAxis(plotArea2);
                     if (valAxis == null) { unsupported.Add(key); break; }
                     valAxis.RemoveAllChildren<C.Title>();
                     if (!value.Equals("none", StringComparison.OrdinalIgnoreCase))
@@ -993,7 +993,7 @@ internal static partial class ChartHelper
                 case "axismin" or "min":
                 {
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
-                    var valAxis = plotArea2?.GetFirstChild<C.ValueAxis>();
+                    var valAxis = PrimaryValueAxis(plotArea2);
                     var scaling = valAxis?.GetFirstChild<C.Scaling>();
                     if (scaling == null) { unsupported.Add(key); break; }
                     var minVal = ParseHelpers.SafeParseDouble(value, "axismin");
@@ -1011,7 +1011,7 @@ internal static partial class ChartHelper
                 case "axismax" or "max":
                 {
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
-                    var valAxis = plotArea2?.GetFirstChild<C.ValueAxis>();
+                    var valAxis = PrimaryValueAxis(plotArea2);
                     var scaling = valAxis?.GetFirstChild<C.Scaling>();
                     if (scaling == null) { unsupported.Add(key); break; }
                     scaling.RemoveAllChildren<C.MaxAxisValue>();
@@ -1026,7 +1026,7 @@ internal static partial class ChartHelper
                 case "majorunit":
                 {
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
-                    var valAxis = plotArea2?.GetFirstChild<C.ValueAxis>();
+                    var valAxis = PrimaryValueAxis(plotArea2);
                     if (valAxis == null) { unsupported.Add(key); break; }
                     var mu = ParseHelpers.SafeParseDouble(value, "majorunit");
                     // OOXML ST_AxisUnit: positive double. 0 or negative would
@@ -1043,7 +1043,7 @@ internal static partial class ChartHelper
                 case "minorunit":
                 {
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
-                    var valAxis = plotArea2?.GetFirstChild<C.ValueAxis>();
+                    var valAxis = PrimaryValueAxis(plotArea2);
                     if (valAxis == null) { unsupported.Add(key); break; }
                     var nu = ParseHelpers.SafeParseDouble(value, "minorunit");
                     if (!(nu > 0))
@@ -1056,7 +1056,7 @@ internal static partial class ChartHelper
                 case "axisnumfmt" or "axisnumberformat":
                 {
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
-                    var valAxis = plotArea2?.GetFirstChild<C.ValueAxis>();
+                    var valAxis = PrimaryValueAxis(plotArea2);
                     if (valAxis == null) { unsupported.Add(key); break; }
                     valAxis.RemoveAllChildren<C.NumberingFormat>();
                     var nf = new C.NumberingFormat { FormatCode = value, SourceLinked = false };
@@ -1093,7 +1093,7 @@ internal static partial class ChartHelper
                 case "gridlines" or "majorgridlines":
                 {
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
-                    var valAxis = plotArea2?.GetFirstChild<C.ValueAxis>();
+                    var valAxis = PrimaryValueAxis(plotArea2);
                     if (valAxis == null) { unsupported.Add(key); break; }
                     valAxis.RemoveAllChildren<C.MajorGridlines>();
                     if (!value.Equals("none", StringComparison.OrdinalIgnoreCase) &&
@@ -1110,7 +1110,7 @@ internal static partial class ChartHelper
                 case "minorgridlines":
                 {
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
-                    var valAxis = plotArea2?.GetFirstChild<C.ValueAxis>();
+                    var valAxis = PrimaryValueAxis(plotArea2);
                     if (valAxis == null) { unsupported.Add(key); break; }
                     valAxis.RemoveAllChildren<C.MinorGridlines>();
                     if (!value.Equals("none", StringComparison.OrdinalIgnoreCase) &&
@@ -1134,42 +1134,42 @@ internal static partial class ChartHelper
                 // already declares get/set: true for these.
                 case "gridlinecolor" or "majorgridlinecolor":
                 {
-                    var gl = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.ValueAxis>()?.GetFirstChild<C.MajorGridlines>();
+                    var gl = PrimaryValueAxis(chart.GetFirstChild<C.PlotArea>())?.GetFirstChild<C.MajorGridlines>();
                     if (gl == null) { unsupported.Add(key); break; }
                     SetGridlineColor(gl, value);
                     break;
                 }
                 case "gridlinewidth" or "majorgridlinewidth":
                 {
-                    var gl = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.ValueAxis>()?.GetFirstChild<C.MajorGridlines>();
+                    var gl = PrimaryValueAxis(chart.GetFirstChild<C.PlotArea>())?.GetFirstChild<C.MajorGridlines>();
                     if (gl == null) { unsupported.Add(key); break; }
                     if (!SetGridlineWidth(gl, value)) { unsupported.Add(key); }
                     break;
                 }
                 case "gridlinedash" or "majorgridlinedash":
                 {
-                    var gl = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.ValueAxis>()?.GetFirstChild<C.MajorGridlines>();
+                    var gl = PrimaryValueAxis(chart.GetFirstChild<C.PlotArea>())?.GetFirstChild<C.MajorGridlines>();
                     if (gl == null) { unsupported.Add(key); break; }
                     SetGridlineDash(gl, value);
                     break;
                 }
                 case "minorgridlinecolor":
                 {
-                    var gl = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.ValueAxis>()?.GetFirstChild<C.MinorGridlines>();
+                    var gl = PrimaryValueAxis(chart.GetFirstChild<C.PlotArea>())?.GetFirstChild<C.MinorGridlines>();
                     if (gl == null) { unsupported.Add(key); break; }
                     SetGridlineColor(gl, value);
                     break;
                 }
                 case "minorgridlinewidth":
                 {
-                    var gl = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.ValueAxis>()?.GetFirstChild<C.MinorGridlines>();
+                    var gl = PrimaryValueAxis(chart.GetFirstChild<C.PlotArea>())?.GetFirstChild<C.MinorGridlines>();
                     if (gl == null) { unsupported.Add(key); break; }
                     if (!SetGridlineWidth(gl, value)) { unsupported.Add(key); }
                     break;
                 }
                 case "minorgridlinedash":
                 {
-                    var gl = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.ValueAxis>()?.GetFirstChild<C.MinorGridlines>();
+                    var gl = PrimaryValueAxis(chart.GetFirstChild<C.PlotArea>())?.GetFirstChild<C.MinorGridlines>();
                     if (gl == null) { unsupported.Add(key); break; }
                     SetGridlineDash(gl, value);
                     break;
@@ -1814,7 +1814,7 @@ internal static partial class ChartHelper
                 case "valaxisvisible" or "valaxis.visible":
                 {
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
-                    var valAx = plotArea2?.GetFirstChild<C.ValueAxis>();
+                    var valAx = PrimaryValueAxis(plotArea2);
                     if (valAx == null) { unsupported.Add(key); break; }
                     valAx.RemoveAllChildren<C.Delete>();
                     valAx.InsertAfter(new C.Delete { Val = !ParseHelpers.IsTruthy(value) }, valAx.GetFirstChild<C.Scaling>());
@@ -1896,7 +1896,7 @@ internal static partial class ChartHelper
                 case "crosses":
                 {
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
-                    var valAx = plotArea2?.GetFirstChild<C.ValueAxis>();
+                    var valAx = PrimaryValueAxis(plotArea2);
                     if (valAx == null) { unsupported.Add(key); break; }
                     // Remove only same-type predecessors. The pre-fix code also
                     // removed C.CrossesAt here, which silently wiped a sibling
@@ -1928,7 +1928,7 @@ internal static partial class ChartHelper
                 case "crossesat":
                 {
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
-                    var valAx = plotArea2?.GetFirstChild<C.ValueAxis>();
+                    var valAx = PrimaryValueAxis(plotArea2);
                     if (valAx == null) { unsupported.Add(key); break; }
                     // Validate BEFORE mutating (SafeParseDouble can throw).
                     var crossesAtVal = ParseHelpers.SafeParseDouble(value, "crossesAt");
@@ -1955,7 +1955,7 @@ internal static partial class ChartHelper
                 case "crossbetween":
                 {
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
-                    var valAx = plotArea2?.GetFirstChild<C.ValueAxis>();
+                    var valAx = PrimaryValueAxis(plotArea2);
                     if (valAx == null) { unsupported.Add(key); break; }
                     // Validate BEFORE mutating.
                     var cbVal = value.ToLowerInvariant() switch
@@ -1980,7 +1980,7 @@ internal static partial class ChartHelper
                 case "axisorientation" or "axisreverse":
                 {
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
-                    var valAx = plotArea2?.GetFirstChild<C.ValueAxis>();
+                    var valAx = PrimaryValueAxis(plotArea2);
                     var scaling = valAx?.GetFirstChild<C.Scaling>();
                     if (scaling == null) { unsupported.Add(key); break; }
                     scaling.RemoveAllChildren<C.Orientation>();
@@ -1999,7 +1999,7 @@ internal static partial class ChartHelper
                 case "logbase" or "logscale" or "yaxisscale":
                 {
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
-                    var valAx = plotArea2?.GetFirstChild<C.ValueAxis>();
+                    var valAx = PrimaryValueAxis(plotArea2);
                     var scaling = valAx?.GetFirstChild<C.Scaling>();
                     if (scaling == null) { unsupported.Add(key); break; }
                     // DEFERRED(xlsx/chart-logscale) CL23: accept `logScale=true`
@@ -2064,7 +2064,7 @@ internal static partial class ChartHelper
                 case "dispunits" or "displayunits":
                 {
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
-                    var valAx = plotArea2?.GetFirstChild<C.ValueAxis>();
+                    var valAx = PrimaryValueAxis(plotArea2);
                     if (valAx == null) { unsupported.Add(key); break; }
                     valAx.RemoveAllChildren<C.DisplayUnits>();
                     if (!value.Equals("none", StringComparison.OrdinalIgnoreCase))
@@ -2204,6 +2204,24 @@ internal static partial class ChartHelper
                             $"Invalid scatterStyle '{value}'. Valid values: line, lineMarker, marker, smooth, smoothMarker.")
                     };
                     sc.PrependChild(new C.ScatterStyle { Val = ssVal });
+                    // #500: PowerPoint and other renderers draw by the series line and
+                    // ignore scatterStyle, so switching to markers-only must
+                    // also turn each series line off — moving its colour onto
+                    // the markers — or the points stay connected.
+                    if (ssVal == C.ScatterStyleValues.Marker)
+                    {
+                        foreach (var ser in sc.Elements<C.ScatterChartSeries>())
+                        {
+                            var spPrS = ser.GetFirstChild<C.ChartShapeProperties>();
+                            var lnS = spPrS?.GetFirstChild<Drawing.Outline>();
+                            if (lnS?.GetFirstChild<Drawing.NoFill>() != null) continue;
+                            var rgb = lnS?.GetFirstChild<Drawing.SolidFill>()?.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
+                            var spPrNew = new C.ChartShapeProperties(new Drawing.Outline(new Drawing.NoFill()));
+                            if (spPrS != null) { spPrS.InsertAfterSelf(spPrNew); spPrS.Remove(); }
+                            else InsertSeriesChildInOrder(ser, spPrNew);
+                            if (rgb != null) ColorScatterMarker(ser, rgb);
+                        }
+                    }
                     break;
                 }
 
@@ -2944,7 +2962,7 @@ internal static partial class ChartHelper
                 case "valaxisline" or "valaxis.line":
                 {
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
-                    var valAx = plotArea2?.GetFirstChild<C.ValueAxis>();
+                    var valAx = PrimaryValueAxis(plotArea2);
                     if (valAx == null) { unsupported.Add(key); break; }
                     ApplyAxisLine(valAx, value);
                     break;
@@ -2958,7 +2976,7 @@ internal static partial class ChartHelper
                 // attribute-by-attribute.
                 case "valaxisline.color" or "valaxisline.width" or "valaxisline.dash":
                 {
-                    var ax = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.ValueAxis>();
+                    var ax = PrimaryValueAxis(chart.GetFirstChild<C.PlotArea>());
                     if (ax == null) { unsupported.Add(key); break; }
                     if (!MutateAxisLineAttr(ax, key.Substring("valaxisline.".Length), value))
                         unsupported.Add(key);
@@ -3005,7 +3023,7 @@ internal static partial class ChartHelper
                 case "valax.sppr":
                 {
                     if (string.IsNullOrWhiteSpace(value)) break;
-                    var valAx = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.ValueAxis>();
+                    var valAx = PrimaryValueAxis(chart.GetFirstChild<C.PlotArea>());
                     if (valAx == null) { unsupported.Add(key); break; }
                     SetAxisSpPr(valAx, new C.ChartShapeProperties(value));
                     break;
@@ -3045,7 +3063,7 @@ internal static partial class ChartHelper
                 case "gridline.sppr" or "minorgridline.sppr":
                 {
                     if (string.IsNullOrWhiteSpace(value)) break;
-                    var valAxG = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.ValueAxis>();
+                    var valAxG = PrimaryValueAxis(chart.GetFirstChild<C.PlotArea>());
                     OpenXmlCompositeElement? gl = key.ToLowerInvariant() == "gridline.sppr"
                         ? valAxG?.GetFirstChild<C.MajorGridlines>()
                         : valAxG?.GetFirstChild<C.MinorGridlines>();
@@ -3067,7 +3085,7 @@ internal static partial class ChartHelper
                 case "valax.txpr":
                 {
                     if (string.IsNullOrWhiteSpace(value)) break;
-                    var valAx = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.ValueAxis>();
+                    var valAx = PrimaryValueAxis(chart.GetFirstChild<C.PlotArea>());
                     if (valAx == null) { unsupported.Add(key); break; }
                     SetAxisTxPr(valAx, new C.TextProperties(value));
                     break;
@@ -3103,8 +3121,8 @@ internal static partial class ChartHelper
                 case "axistitle.ppr":
                 {
                     if (string.IsNullOrWhiteSpace(value)) break;
-                    var vAxisTitle = chart.GetFirstChild<C.PlotArea>()
-                        ?.GetFirstChild<C.ValueAxis>()?.GetFirstChild<C.Title>();
+                    var vAxisTitle = PrimaryValueAxis(chart.GetFirstChild<C.PlotArea>())
+                        ?.GetFirstChild<C.Title>();
                     if (!ApplyTitlePPr(vAxisTitle, value, skipSize: false, skipBold: false))
                         unsupported.Add(key);
                     break;
