@@ -1,0 +1,88 @@
+# Local build output, machine state and editor scratch — none of it belongs in
+# a commit. The example documents under examples/ ARE part of the repository,
+# so nothing there is ignored except the intermediate files a builder writes
+# while it runs (see "Scratch files" below).
+
+# --- .NET build output ------------------------------------------------------
+# build.sh / dev-install.sh stage into bin/<config>/, dotnet keeps bin/ + obj/
+bin/
+obj/
+publish/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+*.userprefs
+*.sln.docstates
+.vs/
+# test / coverage reports
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+# package output
+*.nupkg
+*.snupkg
+project.lock.json
+
+# --- Node / npm -------------------------------------------------------------
+node_modules/
+*.tgz
+npm-debug.log*
+yarn-error.log*
+.pnpm-store/
+
+# --- Python -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+sdk/python/dist/
+
+# --- Scratch files the example builders write -------------------------------
+# The template builders under examples/ppt/templates/styles/*/*/ write
+# s1..s5.json (and science--time-travel a generated build_internal.py, which
+# writes slide1..slide5.json). Only these intermediates are ignored — the
+# document each builder produces stays tracked.
+/examples/**/s[0-9].json
+/examples/**/slide[0-9].json
+/examples/**/build_internal.py
+
+# --- Office lock / temp leftovers -------------------------------------------
+~$*.docx
+~$*.xlsx
+~$*.pptx
+*.tmp
+
+# --- OS, editor and merge leftovers -----------------------------------------
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.bak
+*.orig
+*.rej
+
+# --- Local tooling state ----------------------------------------------------
+# codegraph's index for this checkout (see the CodeGraph instructions in the
+# agent configuration); machine-local, never shared.
+.codegraph/
+
+# --- Secrets and signing material -------------------------------------------
+.env
+.env.*
+!.env.example
+*.p12
+*.pfx
+*.keystore
