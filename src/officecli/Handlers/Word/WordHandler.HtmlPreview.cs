@@ -785,7 +785,7 @@ public partial class WordHandler
           });
           if(sch>maxBodyH-sfH+2){settled=false;break;}
         }
-        if(settled){positionFootnotes();wrapFloats();applyLineNumbers();applyPageFilter();return;}
+        if(settled){positionFootnotes();wrapFloats();applyLineNumbers();applyPageFilter();if(window._gridCols>0){layoutGrid(window._gridCols);}else{flushScreenshotPage();}return;}
       }
     }
     for(var pi=0;pi<loopLim;pi++){
@@ -1081,7 +1081,7 @@ public partial class WordHandler
       document.querySelectorAll('a[id^=""_Toc""]').forEach(function(a){
         for(var i=0;i<pgs.length;i++) if(pgs[i].contains(a)){pmap.push(a.id+'='+(i+1));break;}
       });
-      if(window._gridCols>0){layoutGrid(window._gridCols);}
+      if(window._gridCols>0){applyPageFilter();layoutGrid(window._gridCols);}
       else{applyPageFilter();flushScreenshotPage();}
       document.title='PAGES:'+pgs.length+(pmap.length?'|MAP:'+pmap.join(','):'');
     }
@@ -1256,7 +1256,14 @@ public partial class WordHandler
     var avail=document.body.clientWidth-2*pad;
     var cellW=Math.floor((avail-(cols-1)*gap)/cols);
     if(cellW<1)cellW=window._gridCellW||220;
-    var wraps=Array.prototype.filter.call(document.querySelectorAll('.page-wrapper'),function(w){return w.offsetParent!==null;});
+    // A --page range hides the pages outside it (applyPageFilter); their
+    // wrappers must not take a cell, so hide them too and tile the rest.
+    var wraps=Array.prototype.filter.call(document.querySelectorAll('.page-wrapper'),function(w){
+      if(w.offsetParent===null)return false;
+      var pg=w.querySelector('.page');
+      if(pg&&pg.style.display==='none'){w.style.display='none';return false;}
+      return true;
+    });
     wraps.forEach(function(wrapper){
       var page=wrapper.querySelector('.page');if(!page)return;
       var pageW=page.offsetWidth,pageH=page.offsetHeight;

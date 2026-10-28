@@ -166,7 +166,7 @@ to stdout and exiting 0. The object describes the plugin to the main binary.
 |---|---|---|
 | `name` | string | Stable identifier, kebab-case (e.g. `officecli-doc`) |
 | `version` | string | SemVer of the plugin (e.g. `1.0.0`) |
-| `protocol` | integer | Protocol major version this plugin implements. v1 plugins MUST set `1`. Main rejects mismatches with exit code 5. |
+| `protocol` | integer | Protocol major version this plugin implements. v1 plugins MUST set `1`. Main refuses to load a mismatched plugin: the open fails with error code `protocol_mismatch` (§6.6) and main's usual exit code 1. (Exit code 5 in §6.5 is what a plugin *process* returns.) |
 | `kinds` | array | One or more declared kinds (see §2). Common case: `["dump-reader"]` |
 | `extensions` | array | File extensions this plugin handles, leading dot (`[".doc"]`) |
 | `idle_timeout_seconds` | object | Idle-timeout budget per verb. See §4.2. |

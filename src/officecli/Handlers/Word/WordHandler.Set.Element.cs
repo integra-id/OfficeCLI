@@ -3279,6 +3279,32 @@ public partial class WordHandler
                             gIdx += rcSpan;
                         }
                     }
+                    // A merged (gridSpan > 1) cell's tcW must equal the sum of
+                    // the grid columns it spans. The loops above deliberately
+                    // skip multi-span cells, which left their OLD tcW in place:
+                    // tblGrid said 4000+1000 while the merged cell still claimed
+                    // 5536, a silent grid/cell disagreement that Word resolves by
+                    // re-flowing the column widths. Re-stamp every merged cell
+                    // whose span touches an updated column from the final grid.
+                    foreach (var tblRow in tbl.Elements<TableRow>())
+                    {
+                        int gIdx = 0;
+                        foreach (var rc in tblRow.Elements<TableCell>())
+                        {
+                            var rcSpan = rc.TableCellProperties?.GridSpan?.Val?.Value ?? 1;
+                            if (rcSpan > 1
+                                && gIdx < parts.Length
+                                && gIdx + rcSpan <= gridColsAfter.Count)
+                            {
+                                long sum = 0;
+                                for (int k = gIdx; k < gIdx + rcSpan; k++)
+                                    sum += long.TryParse(gridColsAfter[k].Width?.Value, out var w) ? w : 0;
+                                var rcTcPr = rc.TableCellProperties ?? rc.PrependChild(new TableCellProperties());
+                                rcTcPr.TableCellWidth = new TableCellWidth { Width = sum.ToString(), Type = TableWidthUnitValues.Dxa };
+                            }
+                            gIdx += rcSpan;
+                        }
+                    }
                     break;
                 }
                 default:

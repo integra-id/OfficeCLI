@@ -44,6 +44,9 @@ public partial class WordHandler
     {
         foreach (var element in body.ChildElements)
         {
+            // w:sectPr closes the body; it is not content and must not count
+            // as an element (it inflated "N total" by one and shifted ranges).
+            if (element is SectionProperties) continue;
             if (element is SdtBlock sdt)
             {
                 var content = sdt.SdtContentBlock;

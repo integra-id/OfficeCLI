@@ -894,10 +894,18 @@ static partial class CommandBuilder
         Dictionary<string, string>? after)
     {
         if (after == null || applied.Count == 0) return "";
+        // camelCase sibling of the requested key (marker → markerSize /
+        // markerColor, point1.marker → point1.markerSize): the readback form
+        // of a compound spelling such as marker=circle:10:FF0000.
+        static bool CamelSibling(string key, string reqKey) =>
+            key.Length > reqKey.Length
+            && key.StartsWith(reqKey, StringComparison.OrdinalIgnoreCase)
+            && char.IsUpper(key[reqKey.Length]);
         bool DiffAttributable(string diffKey, KeyValuePair<string, string> req) =>
             diffKey.Equals(req.Key, StringComparison.OrdinalIgnoreCase)
             || diffKey.StartsWith(req.Key + ".", StringComparison.OrdinalIgnoreCase)
-            || req.Key.StartsWith(diffKey + ".", StringComparison.OrdinalIgnoreCase);
+            || req.Key.StartsWith(diffKey + ".", StringComparison.OrdinalIgnoreCase)
+            || CamelSibling(diffKey, req.Key);
         // Fallback attribution (post-state, no diff evidence): exact key
         // match, or a dotted expansion whose value equals the SAME request's
         // value — pairing both conditions per request keeps a pre-existing
@@ -905,10 +913,21 @@ static partial class CommandBuilder
         // echo (border=thin + wrap=true must not claim
         // border.diagonalUp=true). A same-request sibling genuinely carrying
         // the requested value can still appear — value-truthful, accepted.
+        // A camelCase sibling qualifies in the fallback only when its value
+        // is one of the request's colon segments (markerSize=10 for
+        // marker=circle:10:FF0000), so a pre-existing textAlign never rides
+        // along with text=a:b.
+        static bool SegmentMatches(string reqValue, string value)
+        {
+            if (!reqValue.Contains(':')) return false;
+            var v = value.Trim().TrimStart('#');
+            return reqValue.Split(':').Any(seg => string.Equals(seg.Trim().TrimStart('#'), v, StringComparison.OrdinalIgnoreCase));
+        }
         bool FallbackAttributable(KeyValuePair<string, string> kv, KeyValuePair<string, string> req) =>
             kv.Key.Equals(req.Key, StringComparison.OrdinalIgnoreCase)
             || (kv.Key.StartsWith(req.Key + ".", StringComparison.OrdinalIgnoreCase)
-                && string.Equals(kv.Value, req.Value, StringComparison.Ordinal));
+                && string.Equals(kv.Value, req.Value, StringComparison.Ordinal))
+            || (CamelSibling(kv.Key, req.Key) && SegmentMatches(req.Value, kv.Value));
         var diff = new List<KeyValuePair<string, string>>();
         if (before != null)
             foreach (var kv in after)

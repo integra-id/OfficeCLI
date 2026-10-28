@@ -200,6 +200,14 @@ internal sealed class FormulaEvalSession
     // cycle-free evaluations are stored; the seed-0 value a circular chain
     // returns depends on the entry point and must never be reused.
     internal readonly Dictionary<string, FormulaResult> CellMemo = new(StringComparer.OrdinalIgnoreCase);
+    // Results that DID hit the circular fallback, kept only for the current
+    // root evaluation (cleared when a new top-level formula starts). Within one
+    // root the cycle is broken at a fixed point, so re-evaluating the same cell
+    // again cannot produce a different value; without this memo every cell
+    // downstream of a 0-seeded cycle was recomputed on each reference and an
+    // auto-number chain over a self-referencing seed took exponential time
+    // (issue #456: 22 rows → 56 s, 240 rows → never finished).
+    internal readonly Dictionary<string, FormulaResult> CycleMemo = new(StringComparer.OrdinalIgnoreCase);
     // Populated-extent cache for whole-column/row clamping ("A:A" → used rows).
     // Keyed by SheetData reference; evaluation never adds/removes rows or cells,
     // so the extent is stable for the session's lifetime.
@@ -321,7 +329,7 @@ internal partial class FormulaEvaluator
     {
         try
         {
-            if (_depth == 0) { _visiting.Clear(); _expandingNames.Clear(); }
+            if (_depth == 0) { _visiting.Clear(); _expandingNames.Clear(); _session.CycleMemo.Clear(); }
             // Accept both qualified (`_xlfn.SEQUENCE`) and bare (`SEQUENCE`)
             // forms. Stored XML uses the qualified form post-R11-2; user code
             // and tests still pass the canonical name.
@@ -1279,6 +1287,8 @@ internal partial class FormulaEvaluator
                 // computed under bindings must not leak into other contexts.
                 if (_bindings.Count == 0 && _session.CellMemo.TryGetValue(qualifiedRef, out var memoized))
                     return memoized;
+                if (_bindings.Count == 0 && _session.CycleMemo.TryGetValue(qualifiedRef, out var cycleMemoized))
+                    return cycleMemoized;
                 // Primary: probe the real remaining stack (adapts to formula
                 // complexity, so complex nested formulas are covered too).
                 // Secondary: a high fixed backstop. Over either, surface a
@@ -1312,9 +1322,13 @@ internal partial class FormulaEvaluator
                         // evaluation (a 0-seeded cycle result depends on where the
                         // cycle was entered). Lambdas capture evaluator state and
                         // are not safe to replay.
-                        if (_bindings.Count == 0 && !evaluated.IsLambda
-                            && circularBefore == _session.CircularHits)
-                            _session.CellMemo[qualifiedRef] = evaluated;
+                        if (_bindings.Count == 0 && !evaluated.IsLambda)
+                        {
+                            if (circularBefore == _session.CircularHits)
+                                _session.CellMemo[qualifiedRef] = evaluated;
+                            else
+                                _session.CycleMemo[qualifiedRef] = evaluated;
+                        }
                         return evaluated;
                     }
                 }

@@ -603,6 +603,18 @@ internal static class ParseHelpers
     }
 
     /// <summary>
+    /// Chart marker size: ST_MarkerSize is 2..72. A value outside the range is
+    /// rejected up front — written as-is it passes save but PowerPoint refuses
+    /// to open the file (and cannot repair it).
+    /// </summary>
+    public static byte ParseMarkerSize(string value, string propertyName)
+    {
+        if (!int.TryParse(value?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) || n < 2 || n > 72)
+            throw new ArgumentException($"Invalid '{propertyName}' value '{value}'. Expected an integer 2-72 (ST_MarkerSize); use marker=none to hide markers.");
+        return (byte)n;
+    }
+
+    /// <summary>
     /// Normalize a hex color string to 8-char ARGB format (e.g. "FFFF0000").
     /// Accepts: "FF0000" (6-char RGB → prepend FF), "#FF0000" (strip #), "F00" (3-char → expand),
     /// "80FF0000" (8-char ARGB → as-is). Always returns uppercase.
