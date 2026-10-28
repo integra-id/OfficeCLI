@@ -555,6 +555,12 @@ internal static partial class ChartHelper
             case "auto":     style = C.MarkerStyleValues.Auto; break;
             default:         return false;
         }
+        // Validate the size before touching the part so a rejected value
+        // leaves the package untouched (ST_MarkerSize 2..72, same parser as
+        // every other marker-size writer).
+        byte? size = parts.Length > 1 && !string.IsNullOrWhiteSpace(parts[1])
+            ? ParseHelpers.ParseMarkerSize(parts[1], "point.marker size")
+            : null;
         var dPt = EnsureDataPoint(series, pointIndex);
         var existing = dPt.GetFirstChild<C.Marker>();
         var existingSize = existing?.GetFirstChild<C.Size>()?.CloneNode(true) as C.Size;
@@ -562,8 +568,8 @@ internal static partial class ChartHelper
         dPt.RemoveAllChildren<C.Marker>();
         var marker = new C.Marker();
         marker.AppendChild(new C.Symbol { Val = style });
-        if (parts.Length > 1 && byte.TryParse(parts[1], out var size))
-            marker.AppendChild(new C.Size { Val = size });
+        if (size != null)
+            marker.AppendChild(new C.Size { Val = size.Value });
         else if (existingSize != null)
             marker.AppendChild(existingSize);
         if (parts.Length > 2)
@@ -582,7 +588,7 @@ internal static partial class ChartHelper
 
     internal static bool ApplyDataPointMarkerSize(OpenXmlCompositeElement series, int pointIndex, string value)
     {
-        if (!byte.TryParse(value, out var size)) return false;
+        var size = ParseHelpers.ParseMarkerSize(value, "point.markerSize");
         var dPt = EnsureDataPoint(series, pointIndex);
         var marker = dPt.GetFirstChild<C.Marker>();
         if (marker == null)
@@ -760,7 +766,7 @@ internal static partial class ChartHelper
                 // markerColor ran first (the dump emits marker→markerColor→
                 // markerSize), producing 'unexpected child element size'. Mirrors
                 // ApplyDataPointMarkerSize.
-                var szEl = new C.Size { Val = ParseHelpers.SafeParseByte(value, "series.markerSize") };
+                var szEl = new C.Size { Val = ParseHelpers.ParseMarkerSize(value, "series.markerSize") };
                 var sym = marker.GetFirstChild<C.Symbol>();
                 if (sym != null) sym.InsertAfterSelf(szEl);
                 else marker.PrependChild(szEl);
@@ -1492,7 +1498,9 @@ internal static partial class ChartHelper
             // styling/data sibling; dPt sits after spPr/invertIfNeg/pictureOpts
             // and before dLbls and the data tail. Appending either at the end
             // makes Word silently ignore it (and the validator rejects it).
-            "spPr" => ["invertIfNegative", "pictureOptions", "dPt", "dLbls", "trendline", "errBars", "cat", "val", "xVal", "yVal", "bubbleSize", "bubble3D", "marker", "shape", "smooth", "extLst"],
+            // CT_PieSer / CT_DoughnutSer put explosion right after spPr, so
+            // spPr must land before it too.
+            "spPr" => ["invertIfNegative", "pictureOptions", "explosion", "marker", "dPt", "dLbls", "trendline", "errBars", "cat", "val", "xVal", "yVal", "bubbleSize", "bubble3D", "shape", "smooth", "extLst"],
             "dPt" => ["dLbls", "trendline", "errBars", "cat", "val", "xVal", "yVal", "bubbleSize", "bubble3D", "shape", "smooth", "extLst"],
             "invertIfNegative" => ["pictureOptions", "dPt", "dLbls", "trendline", "errBars", "cat", "val", "xVal", "yVal", "bubbleSize", "bubble3D", "shape", "smooth", "extLst"],
             // CT_PieSer / CT_DoughnutSer: idx, order, tx?, spPr?, explosion?, dPt*, dLbls?, cat?, val?

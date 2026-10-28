@@ -832,37 +832,13 @@ internal static partial class ChartHelper
             var axisAfter = plotArea != null ? FindAxisByRole(plotArea, normalizedRole) : null;
             var axisTitle = (axisAfter as OpenXmlCompositeElement)?.GetFirstChild<C.Title>();
 
-            // R52 bt-2: when title.size / title.bold / title.font / title.color
-            // is set on an axis whose title element is missing, auto-create an
-            // empty <c:title> block on the resolved axis. Previously these keys
-            // were silently shoveled into the unsupported list — asymmetric with
-            // the Get side (which surfaces the same keys via DefaultRunProperties
-            // on a present-but-empty title) and indistinguishable from a true
-            // unknown-key reject. Mirrors BuildChartTitle's empty-title shape.
-            if (axisTitle == null && axisAfter is OpenXmlCompositeElement axHost)
-            {
-                axisTitle = new C.Title(
-                    new C.ChartText(
-                        new C.RichText(
-                            new Drawing.BodyProperties(),
-                            new Drawing.ListStyle(),
-                            new Drawing.Paragraph(
-                                new Drawing.ParagraphProperties(
-                                    new Drawing.DefaultRunProperties()),
-                                new Drawing.Run(
-                                    new Drawing.RunProperties { Language = "en-US" },
-                                    new Drawing.Text(string.Empty))))),
-                    new C.Overlay { Val = false });
-                // Schema order: ...title, numFmt, majorTickMark... — title sits
-                // after MinorGridlines / MajorGridlines / AxisPosition. Match
-                // the insertion site used by axistitle/cattitle in
-                // SetChartProperties so PowerPoint accepts the result.
-                var insertAfter = (OpenXmlElement?)axHost.GetFirstChild<C.MinorGridlines>()
-                    ?? (OpenXmlElement?)axHost.GetFirstChild<C.MajorGridlines>()
-                    ?? axHost.GetFirstChild<C.AxisPosition>();
-                if (insertAfter != null) axHost.InsertAfter(axisTitle, insertAfter);
-                else axHost.AppendChild(axisTitle);
-            }
+            // Styling needs a title to style: no empty <c:title> is fabricated
+            // to carry the style (it renders as nothing). Same precondition
+            // rule as the chart-level title.* keys.
+            if (axisTitle == null)
+                throw new CliException(
+                    $"'{pendingAxisTitleStyling.Keys.First()}' styles the axis title, but this axis has no title. Pass title=<text> in the same command (title is applied first).")
+                { Code = "invalid_value", Suggestion = "Add --prop title=<text> to the same set command, or set title first." };
 
             foreach (var (axKey, axVal) in pendingAxisTitleStyling)
             {

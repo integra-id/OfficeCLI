@@ -555,20 +555,11 @@ public partial class WordHandler
                     if (isRegex && matchObjs != null && i < matchObjs.Count)
                         effectiveReplace = matchObjs[i].Result(replace);
 
-                    // Cross-hyperlink replacement is still rejected — the wrapped
-                    // form would corrupt the URL/format-binding of the hyperlink
-                    // structure just as the unwrapped form did.
-                    {
-                        var affected = BuildRunTexts(para)
-                            .Where(rt => rt.End > matchStart && rt.Start < matchEnd)
-                            .Select(rt => rt.Run.Ancestors<Hyperlink>().FirstOrDefault())
-                            .Distinct()
-                            .ToList();
-                        if (affected.Count > 1)
-                            throw new ArgumentException(
-                                $"find/replace+revision cannot span a hyperlink boundary "
-                                + $"(match at offset {matchStart}, length {matchLen})");
-                    }
+                    // A match may cross a w:hyperlink boundary: every matched run
+                    // is wrapped as w:del where it lives (inside the hyperlink or
+                    // in the paragraph), so the hyperlink keeps its r:id and
+                    // formatting binding. Only the untracked path has to refuse
+                    // this, because it rewrites text across runs.
 
                     // Split the runs so the matched span is a contiguous list of
                     // sibling runs we can wrap individually.
@@ -611,22 +602,30 @@ public partial class WordHandler
                     // Wrap each matched run as w:del. WrapRunAsDeleted returns the
                     // wrapper so we can locate the insertion point for the w:ins
                     // (immediately after the last w:del wrapper).
+                    DeletedRun? firstDelWrapper = null;
                     DeletedRun? lastDelWrapper = null;
                     foreach (var run in targetRuns)
                     {
                         var w = WrapRunAsDeleted(run, author, date, null);
-                        if (w != null) lastDelWrapper = w;
+                        if (w != null) { firstDelWrapper ??= w; lastDelWrapper = w; }
                     }
 
                     // Insert replacement (skip if user passed --prop replace="" — a
                     // deletion-only operation). The new w:ins sibling sits right
-                    // after the last w:del wrapper.
+                    // after the last w:del wrapper. When the match crossed a
+                    // hyperlink boundary the wrappers have different parents; the
+                    // replacement then goes where the match started (before the
+                    // first wrapper, in its container), which is where Word puts
+                    // text typed over such a selection.
                     if (!string.IsNullOrEmpty(effectiveReplace) && lastDelWrapper?.Parent != null)
                     {
                         var newRun = new Run(
                             templateRPr,
                             new Text(effectiveReplace) { Space = SpaceProcessingModeValues.Preserve });
-                        lastDelWrapper.Parent.InsertAfter(newRun, lastDelWrapper);
+                        if (firstDelWrapper?.Parent != null && !ReferenceEquals(firstDelWrapper.Parent, lastDelWrapper.Parent))
+                            firstDelWrapper.Parent.InsertBefore(newRun, firstDelWrapper);
+                        else
+                            lastDelWrapper.Parent.InsertAfter(newRun, lastDelWrapper);
                         WrapRunAsInserted(newRun, author, date, null);
                     }
                 }

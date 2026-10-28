@@ -2054,7 +2054,27 @@ public partial class WordHandler
         // anchor-based positions and always appended.
         var index = ResolveAnchorPosition(targetParent, targetParentPath, position);
 
-        InsertAtPosition(targetParent, clone, index);
+        // CONSISTENCY(table-row-anchor): for a row anchor inside a <w:tbl>,
+        // ResolveAnchorPosition returns a ROW-ONLY index (the AddRow contract),
+        // not an offset into ChildElements. InsertAtPosition indexes
+        // ChildElements, where tblPr / tblGrid precede the rows, so the clone
+        // landed two rows early (`--from tr[4] --after tr[4]` produced tr[3])
+        // and the reported path matched the wrong spot, with no error. Insert a
+        // cloned row in row space instead.
+        if (targetParent is Table rowTable && clone is TableRow && index.HasValue)
+        {
+            var rows = rowTable.Elements<TableRow>().ToList();
+            if (index.Value >= 0 && index.Value < rows.Count)
+                rows[index.Value].InsertBeforeSelf(clone);
+            else if (rows.Count > 0)
+                rows[^1].InsertAfterSelf(clone);
+            else
+                AppendToParent(rowTable, clone);
+        }
+        else
+        {
+            InsertAtPosition(targetParent, clone, index);
+        }
 
         SaveDoc();
 
