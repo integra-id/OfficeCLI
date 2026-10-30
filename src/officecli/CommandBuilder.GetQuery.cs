@@ -55,7 +55,7 @@ static partial class CommandBuilder
             }, json) is {} rc) return rc;
 
             using var handler = DocumentHandlerFactory.Open(file.FullName);
-            var node = handler.Get(path, depth);
+            var node = GetNodeAtDepth(handler, path, depth);
 
             // CONSISTENCY(get-not-found-exit): some handler Get paths surface
             // "not found" via DocumentNode { Type = "error" } instead of
@@ -63,14 +63,7 @@ static partial class CommandBuilder
             // throw and exit 1 via SafeRun. Treat error-type nodes the same
             // way so callers get a consistent non-zero exit on missing paths.
             if (string.Equals(node.Type, "error", StringComparison.Ordinal))
-            {
-                var err = node.Text ?? $"Path not found: {path}";
-                if (json)
-                    Console.WriteLine(OutputFormatter.WrapEnvelopeError(err));
-                else
-                    Console.Error.WriteLine($"Error: {err}");
-                return 1;
-            }
+                throw new OfficeCli.Core.CliException(node.Text ?? $"Path not found: {path}") { Code = "not_found" };
 
             // --save <path>: extract the binary payload backing an OLE /
             // picture / media node to disk. The handler exposes this via
@@ -80,14 +73,8 @@ static partial class CommandBuilder
             if (!string.IsNullOrEmpty(savePath))
             {
                 if (!handler.TryExtractBinary(path, savePath, out var contentType, out var byteCount))
-                {
-                    var err = $"Node at '{path}' has no binary payload to extract (only ole/picture/media/embedded nodes can be saved).";
-                    if (json)
-                        Console.WriteLine(OutputFormatter.WrapEnvelopeError(err));
-                    else
-                        Console.Error.WriteLine($"Error: {err}");
-                    return 1;
-                }
+                    throw new OfficeCli.Core.CliException($"Node at '{path}' has no binary payload to extract (only ole/picture/media/embedded nodes can be saved).")
+                    { Code = "unsupported_type", Suggestion = "Point --save at a picture, media, ole or embedded node (see `query picture`)." };
                 node.Format["savedTo"] = savePath;
                 node.Format["savedBytes"] = byteCount;
                 if (!string.IsNullOrEmpty(contentType))
@@ -102,7 +89,7 @@ static partial class CommandBuilder
                 Console.WriteLine(OutputFormatter.WrapEnvelope(
                     OutputFormatter.FormatNodes(new List<DocumentNode> { node }, OutputFormat.Json)));
             else
-                Console.WriteLine(OutputFormatter.FormatNode(node, OutputFormat.Text));
+                Console.WriteLine(OutputFormatter.FormatNode(node, OutputFormat.Text).TrimEnd('\r', '\n'));
             return 0;
         }, json); });
 
@@ -192,6 +179,9 @@ static partial class CommandBuilder
             if (compact && json)
                 throw new OfficeCli.Core.CliException("--compact is a plain-text line format; drop --json (or drop --compact for the JSON tree).") { Code = "invalid_value" };
 
+            if (string.IsNullOrWhiteSpace(selector))
+                throw new OfficeCli.Core.CliException("'query' requires a selector (e.g. paragraph, shape, row[Score>80]).")
+                { Code = "invalid_input", Suggestion = "Run 'officecli query --help' for selector syntax." };
             if (TryResident(file.FullName, req =>
             {
                 req.Command = "query";
@@ -225,53 +215,7 @@ static partial class CommandBuilder
                 Console.WriteLine(FormatNodesCompact(handler, results, fields));
                 return 0;
             }
-            if (json)
-            {
-                // CONSISTENCY(query-json-children): Query returns nodes with empty
-                // Children but populated ChildCount (handlers build query nodes at
-                // depth=0 to avoid expensive subtree walks). For --json output we
-                // hydrate children via Get(path, depth=1) so consumers see the same
-                // shape that `get --json` produces.
-                for (int i = 0; i < results.Count; i++)
-                {
-                    var n = results[i];
-                    if (n.ChildCount > 0 && n.Children.Count == 0 && !string.IsNullOrEmpty(n.Path))
-                    {
-                        try
-                        {
-                            var hydrated = handler.Get(n.Path, depth: 1);
-                            if (hydrated?.Children != null && hydrated.Children.Count > 0)
-                                n.Children.AddRange(hydrated.Children);
-                        }
-                        catch { /* path may not be Get-resolvable; leave as-is */ }
-                    }
-                }
-                var cliWarnings = warnings.Select(w => new OfficeCli.Core.CliWarning
-                {
-                    Message = w.Message,
-                    Code = w.Code,
-                    Kind = w.Kind,
-                    Key = w.Key,
-                    Value = w.Value,
-                    Available = w.Available,
-                    Suggestion = w.Suggestion,
-                }).ToList();
-                Console.WriteLine(OutputFormatter.WrapEnvelope(
-                    OutputFormatter.FormatNodes(results, OutputFormat.Json),
-                    cliWarnings.Count > 0 ? cliWarnings : null));
-            }
-            else
-            {
-                foreach (var w in warnings) Console.Error.WriteLine(w.Message);
-                var output = OutputFormatter.FormatNodes(results, OutputFormat.Text);
-                if (!string.IsNullOrEmpty(output))
-                    Console.WriteLine(output);
-                if (results.Count == 0)
-                {
-                    var ext = file.Extension.ToLowerInvariant().TrimStart('.');
-                    Console.Error.WriteLine($"No matches. Run 'officecli {ext} query' for selector syntax.");
-                }
-            }
+            PrintQueryResults(handler, results, warnings, json, file.Extension, fields);
             return 0;
         }, json); });
 
@@ -313,6 +257,70 @@ static partial class CommandBuilder
     /// (open set of values, fixed [style] position). New label values may be
     /// added; existing ones never change meaning.
     /// </summary>
+    /// <summary>
+    /// Print query results: JSON hydrates each node's children (so the shape
+    /// matches `get --json`) and wraps the envelope with the selector warnings;
+    /// text prints the warnings on stderr, the nodes, and a "No matches" hint
+    /// when nothing matched. Shared by the CLI front-end and the resident.
+    /// </summary>
+    /// <summary>`get` with --depth 0 answers the node itself, without its children (depth 1 is the default).</summary>
+    internal static DocumentNode GetNodeAtDepth(IDocumentHandler handler, string path, int depth)
+    {
+        if (depth < 0)
+            throw new OfficeCli.Core.CliException($"Invalid --depth {depth}: must be >= 0.") { Code = "invalid_value" };
+        var node = handler.Get(path, Math.Max(depth, 1));
+        if (depth == 0) node.Children.Clear();
+        return node;
+    }
+
+    internal static void PrintQueryResults(IDocumentHandler handler, List<DocumentNode> results,
+        List<OfficeCli.Core.AttributeFilter.FilterDiagnostic> warnings, bool json, string extension, string? fields = null)
+    {
+        if (!string.IsNullOrWhiteSpace(fields))
+            Console.Error.WriteLine("Warning: --fields only applies to --compact output; ignored.");
+        if (json)
+        {
+            foreach (var n in results)
+            {
+                if (n.ChildCount > 0 && n.Children.Count == 0 && !string.IsNullOrEmpty(n.Path))
+                {
+                    try
+                    {
+                        var hydrated = handler.Get(n.Path, depth: 1);
+                        if (hydrated?.Children != null && hydrated.Children.Count > 0)
+                            n.Children.AddRange(hydrated.Children);
+                    }
+                    catch { /* path may not be Get-resolvable; leave as-is */ }
+                }
+            }
+            var cliWarnings = warnings.Select(w => new OfficeCli.Core.CliWarning
+            {
+                Message = w.Message,
+                Code = w.Code,
+                Kind = w.Kind,
+                Key = w.Key,
+                Value = w.Value,
+                Available = w.Available,
+                Suggestion = w.Suggestion,
+            }).ToList();
+            Console.WriteLine(OutputFormatter.WrapEnvelope(
+                OutputFormatter.FormatNodes(results, OutputFormat.Json),
+                cliWarnings.Count > 0 ? cliWarnings : null));
+        }
+        else
+        {
+            foreach (var w in warnings) Console.Error.WriteLine(w.Message);
+            var output = OutputFormatter.FormatNodes(results, OutputFormat.Text);
+            if (!string.IsNullOrEmpty(output))
+                Console.WriteLine(output);
+            if (results.Count == 0)
+            {
+                var ext = extension.ToLowerInvariant().TrimStart('.');
+                Console.Error.WriteLine($"No matches. Run 'officecli help {ext} query' for selector syntax.");
+            }
+        }
+    }
+
     internal static string FormatNodesCompact(IDocumentHandler handler, List<DocumentNode> results, string? fields)
     {
         if (handler is ExcelHandler)
@@ -364,6 +372,10 @@ static partial class CommandBuilder
                       .Append(n.Format.TryGetValue(f, out var v) && v != null ? v.ToString() : "");
             sb.Append('\n');
         }
+
+        if (fieldList != null && results.Count > 0)
+            foreach (var f in fieldList.Where(f => !results.Any(n => n.Format.ContainsKey(f))))
+                Console.Error.WriteLine($"Warning: --fields '{f}' is not a Format key of any matched element (column left empty).");
 
         var (total, containerSuffix) = CountCompactDenominator(handler);
         sb.Append($"total: {results.Count} of {total} elements{containerSuffix}");
