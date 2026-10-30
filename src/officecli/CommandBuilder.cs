@@ -341,6 +341,8 @@ static partial class CommandBuilder
                 var firstLine = string.IsNullOrEmpty(stderr)
                     ? ""
                     : stderr.Split('\n', 2)[0].TrimEnd('\r').Trim();
+                // "Unhandled exception: System.Xml.XmlException: <msg>" → "<msg>"
+                firstLine = System.Text.RegularExpressions.Regex.Replace(firstLine, @"^Unhandled exception:\s*[\w.]+Exception:\s*", "");
                 error = string.IsNullOrEmpty(firstLine)
                     ? "Resident process exited."
                     : $"Resident process exited. {firstLine}";
@@ -811,6 +813,14 @@ static partial class CommandBuilder
     internal static SetApplyOutcome ApplySetWithCorrection(
         OfficeCli.Core.IDocumentHandler handler, string path, Dictionary<string, string> props)
     {
+        var hasFind = props.Keys.Any(k => k.Equals("find", StringComparison.OrdinalIgnoreCase));
+        var hasReplace = props.Keys.Any(k => k.Equals("replace", StringComparison.OrdinalIgnoreCase));
+        if (hasReplace && !hasFind)
+            throw new OfficeCli.Core.CliException("'replace' requires 'find': nothing to replace was specified.")
+            { Code = "invalid_input", Suggestion = "Pass --find <text> together with --replace, or set text= to overwrite the whole text." };
+        if ((hasFind || hasReplace) && handler is OfficeCli.Handlers.ExcelHandler)
+            throw new OfficeCli.Core.CliException("find/replace is not supported on xlsx cells (cells hold a single value).")
+            { Code = "invalid_input", Suggestion = "Set the cell with --prop value=<text>, or use a selector such as Sheet1!cell[value=old] with value=new." };
         var raw = handler.Set(path, props);
         string? scope = handler switch
         {
@@ -1999,14 +2009,13 @@ static partial class CommandBuilder
                 return 0;
 
             // Document is protected — block the write
-            var msg = $"Document is protected (mode: {protection}). " +
-                      "Use Query(\"editable\") to find editable fields, or use --force to override protection.";
-            if (json)
-                Console.WriteLine(OutputFormatter.WrapEnvelopeError(msg, new List<OfficeCli.Core.CliWarning>()));
-            else
-                Console.Error.WriteLine($"ERROR: {msg}");
-            return 1;
+            // Same error shape as batch / the resident: a coded CliException.
+            throw new OfficeCli.Core.CliException(
+                $"Document is protected (mode: {protection}). " +
+                "Use Query(\"editable\") to find editable fields, or use --force to override protection.")
+            { Code = "document_protected" };
         }
+        catch (OfficeCli.Core.CliException) { throw; } // the protection verdict itself
         catch
         {
             // If we can't read protection info, allow the write to proceed
